@@ -17,17 +17,17 @@
         },
         {
             id: 'sherlock-holmes',
-            name: 'New Books Coming Soon!',
-            assetPath: '',
-            author: '',
-            locked: true,
+            name: 'The Adventures of Sherlock Holmes',
+            assetPath: 'assets/library/sherlock-holmes.json',
+            author: 'Arthur Conan Doyle',
+            locked: false,
         },
         {
             id: 'twenty-thousand-leagues',
-            name: 'New Books Coming Soon!',
-            assetPath: '',
-            author: '',
-            locked: true,
+            name: 'Twenty Thousand Leagues Under the Sea',
+            assetPath: 'assets/library/twenty-thousand-leagues.json',
+            author: 'Jules Verne',
+            locked: false,
         },
     ];
     const DRONE_SPECIALIZATIONS = [
@@ -46,7 +46,7 @@
             id: 'precision',
             name: 'Precision Firmware',
             description: 'Drones have a 25% chance to channel your current critical damage multiplier.',
-            unlockLevel: 10,
+            unlockLevel: 15,
             attackSpeedMultiplier: 1,
             passiveDamageMultiplier: 1,
             perShotDamageMultiplier: 1,
@@ -57,7 +57,7 @@
             id: 'salvage',
             name: 'Salvage Firmware',
             description: 'Drones deal 20% less damage, but occasionally recover double crystal payloads.',
-            unlockLevel: 10,
+            unlockLevel: 20,
             attackSpeedMultiplier: 1,
             passiveDamageMultiplier: 0.8,
             perShotDamageMultiplier: 0.8,
@@ -153,7 +153,7 @@
             if (num >= entry.value) {
                 const scaled = num / entry.value;
                 const decimals = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2;
-                return `${scaled.toFixed(decimals).replace(/\.?0+$/, '')}${entry.suffix}`;
+                return `${Number(scaled.toFixed(decimals))}${entry.suffix}`;
             }
         }
         return String(Math.round(num));
@@ -506,7 +506,7 @@
         return {
             version: 3,
             totalAetherCrystals: Math.max(0, Math.floor(Number(state.totalAetherCrystals) || 0)),
-            asteroidHP: Math.max(0, Number(state.asteroidHP) || fallback.asteroidHP),
+            asteroidHP: Math.max(0, Number.isFinite(Number(state.asteroidHP)) && state.asteroidHP !== null && state.asteroidHP !== '' ? Number(state.asteroidHP) : fallback.asteroidHP),
             asteroidMaxHP: Math.max(1, Number(state.asteroidMaxHP) || fallback.asteroidMaxHP),
             currentLayer: Math.max(0, Math.floor(Number(state.currentLayer) || 0)),
             currentStoryBookId,
@@ -537,6 +537,8 @@
         return STORY_LIBRARY.find((book) => book.id === bookId) || null;
     }
 
+    const MAX_ELAPSED_MS = 8 * 60 * 60 * 1000;
+
     function getDroneSpecializationDefinition(specId) {
         return DRONE_SPECIALIZATIONS.find((entry) => entry.id === specId) || null;
     }
@@ -553,6 +555,30 @@
             perShotDamageMultiplier: spec ? spec.perShotDamageMultiplier : 1,
             passiveCritChance: spec ? spec.passiveCritChance : 0,
             doubleCrystalChance: spec ? spec.doubleCrystalChance : 0,
+        };
+    }
+
+    function getDroneNetMultiplier(effects) {
+        return (Number(effects.passiveDamageMultiplier) || 1)
+            * (Number(effects.attackSpeedMultiplier) || 1)
+            * (Number(effects.perShotDamageMultiplier) || 1);
+    }
+
+    // Passive damage accrued between state.lastTickAt and now. Elapsed time is
+    // capped, and the overload multiplier applies only before overload expiry.
+    function computePassiveDamage(normalized, now) {
+        const elapsedMs = Math.min(MAX_ELAPSED_MS, Math.max(0, now - normalized.lastTickAt));
+        const droneEffects = getDroneSpecializationEffects(normalized.droneSpecialization);
+        const perSecond = normalized.dps * getDroneNetMultiplier(droneEffects);
+        if (!elapsedMs || !perSecond) return { elapsedMs, baseDamage: 0, overloadDamage: 0, droneEffects, perSecond };
+        const windowStart = normalized.lastTickAt;
+        const overloadMs = Math.max(0, Math.min(elapsedMs, normalized.overloadEndsAt - windowStart));
+        return {
+            elapsedMs,
+            baseDamage: perSecond * ((elapsedMs - overloadMs) / 1000),
+            overloadDamage: perSecond * 3 * (overloadMs / 1000),
+            droneEffects,
+            perSecond,
         };
     }
 
@@ -625,13 +651,15 @@
         if (normalized.overloadMeter < 100) {
             return { ok: false, error: 'Overload not charged.', state: saveMiningState(normalized) };
         }
-        normalized.overloadMeter = 0;
-        normalized.overloadEndsAt = now + OVERLOAD_DURATION_MS;
-        normalized.lastTickAt = now;
+        // Credit passive damage accrued before overload starts.
+        const credited = recalculateDerivedState(applyDamageToState(normalized, 0, { now, source: 'idle' }).state);
+        credited.overloadMeter = 0;
+        credited.overloadEndsAt = now + OVERLOAD_DURATION_MS;
+        credited.lastTickAt = now;
         return {
             ok: true,
-            state: saveMiningState(normalized),
-            endsAt: normalized.overloadEndsAt,
+            state: saveMiningState(credited),
+            endsAt: credited.overloadEndsAt,
             durationMs: OVERLOAD_DURATION_MS,
         };
     }
@@ -642,8 +670,12 @@
         if (dronesLevel < 10) {
             return { ok: false, error: 'Automated Limpet Drones must reach level 10 first.', state: saveMiningState(normalized) };
         }
-        if (specId && !getDroneSpecializationDefinition(specId)) {
+        const specDef = specId ? getDroneSpecializationDefinition(specId) : null;
+        if (specId && !specDef) {
             return { ok: false, error: 'Unknown drone specialization.', state: saveMiningState(normalized) };
+        }
+        if (specDef && dronesLevel < specDef.unlockLevel) {
+            return { ok: false, error: `${specDef.name} requires Automated Limpet Drones level ${specDef.unlockLevel}.`, state: saveMiningState(normalized) };
         }
         normalized.droneSpecialization = specId || '';
         return { ok: true, state: saveMiningState(normalized), specialization: normalized.droneSpecialization };
@@ -690,7 +722,7 @@
         const overloadActive = isOverloadActive(normalized, nowMs);
         const droneEffects = getDroneSpecializationEffects(normalized.droneSpecialization);
         const passiveDamageMultiplier = roundTo(
-            droneEffects.passiveDamageMultiplier * (overloadActive ? 3 : 1),
+            getDroneNetMultiplier(droneEffects) * (overloadActive ? 3 : 1),
             3,
         );
         return {
@@ -710,7 +742,8 @@
         const wordsEquivalent = charactersTyped / 5;
         const wpm = Math.max(0, Number(payload.wpm) || 0);
         const baseDamage = Math.max(1, Number(payload.baseDamage) || DEFAULT_BASE_DAMAGE);
-        const accuracy = clamp(Number(payload.accuracy), 0, 1.1);
+        const rawAccuracy = payload.accuracy === null || payload.accuracy === undefined || payload.accuracy === '' ? NaN : Number(payload.accuracy);
+        const accuracy = Number.isFinite(rawAccuracy) ? clamp(rawAccuracy, 0, 1.1) : NaN;
         const combo = Math.max(0, Number(payload.combo) || 0);
         const bufferBonus = Math.max(0, Number(payload.bufferBonus) || 0);
         const activeUpgradeBonus = Math.max(0, Number(payload.activeUpgradeBonus) || 0);
@@ -722,7 +755,7 @@
         const critChanceApplied = overloadActive ? 1 : Math.max(0, Math.min(1, baseCritChance + focusBonus));
         const rollForCrit = !!payload.rollForCrit;
 
-        const effectiveAccuracy = Number.isFinite(accuracy) ? accuracy : 1;
+        const effectiveAccuracy = Number.isFinite(accuracy) ? accuracy : 0.5;
         const accuracyMultiplier = clamp(0.35 + (effectiveAccuracy * 0.75), 0.35, 1.1);
         const wpmMultiplier = clamp((wpm / 45) + 0.55 + bufferBonus, 0.55, 4.6);
         const comboMultiplier = clamp(1 + (combo * 0.03), 1, 1.45);
@@ -798,6 +831,11 @@
         const crystalMultiplier = Math.max(1, Number(meta && meta.crystalMultiplier) || 1);
         const doubleCrystalChance = clamp(Number(meta && meta.doubleCrystalChance) || 0, 0, 1);
 
+        // Credit passive DPS accrued since the last tick before moving lastTickAt.
+        const passive = computePassiveDamage(normalized, timestamp);
+        damage += roundTo(passive.baseDamage + passive.overloadDamage, 2);
+        normalized.lastTickAt = timestamp;
+
         if (damage <= 0) {
             return { state: normalized, result: { damageApplied: 0, crystalsEarned, shatteredLayers } };
         }
@@ -848,13 +886,11 @@
     function tickMiningState(state, nowMs) {
         const normalized = recalculateDerivedState(state);
         const now = Math.max(0, Number(nowMs) || Date.now());
-        const elapsedMs = Math.max(0, now - normalized.lastTickAt);
+        const passive = computePassiveDamage(normalized, now);
+        const elapsedMs = passive.elapsedMs;
         const overloadActive = isOverloadActive(normalized, now);
-        const droneEffects = getDroneSpecializationEffects(normalized.droneSpecialization);
-        const effectiveDps = roundTo(
-            normalized.dps * droneEffects.passiveDamageMultiplier * (overloadActive ? 3 : 1),
-            2,
-        );
+        const droneEffects = passive.droneEffects;
+        const effectiveDps = roundTo(passive.perSecond * (overloadActive ? 3 : 1), 2);
         if (!elapsedMs || !effectiveDps) {
             normalized.lastTickAt = now;
             return {
@@ -866,10 +902,10 @@
             };
         }
 
-        let idleDamage = roundTo(effectiveDps * (elapsedMs / 1000), 2);
+        const overloadedPortion = passive.overloadDamage > 0;
+        let idleDamage = roundTo(passive.baseDamage + (overloadedPortion ? passive.overloadDamage * normalized.critMultiplier : 0), 2);
         let passiveCritApplied = false;
-        if (idleDamage > 0 && overloadActive) {
-            idleDamage = roundTo(idleDamage * normalized.critMultiplier, 2);
+        if (idleDamage > 0 && overloadedPortion) {
             passiveCritApplied = true;
         } else if (idleDamage > 0 && droneEffects.passiveCritChance > 0 && Math.random() < droneEffects.passiveCritChance) {
             idleDamage = roundTo(idleDamage * normalized.critMultiplier, 2);
@@ -932,12 +968,16 @@
     function flushMiningCommunityBuffer(state) {
         const normalized = sanitizeState(state);
         const damage = Math.max(0, Math.floor(Number(normalized.communityContribution.pendingDamage) || 0));
+        if (!damage) return { damage: 0, state: normalized };
         try {
-            global.localStorage.setItem(MINING_COMMUNITY_STORAGE_KEY, JSON.stringify({ damage }));
+            const total = getBufferedCommunityContribution().damage + damage;
+            global.localStorage.setItem(MINING_COMMUNITY_STORAGE_KEY, JSON.stringify({ damage: total }));
         } catch (error) {
-            // Ignore quota/storage issues.
+            // Storage failed: keep pending so damage is not lost.
+            return { damage: 0, state: normalized };
         }
-        return damage;
+        normalized.communityContribution.pendingDamage = 0;
+        return { damage, state: saveMiningState(normalized) };
     }
 
     global.TypeMineMining = {

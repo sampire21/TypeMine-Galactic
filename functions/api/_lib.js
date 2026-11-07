@@ -88,7 +88,7 @@ function base64UrlToString(value) {
   return new TextDecoder().decode(bytes);
 }
 
-function constantTimeEqual(a, b) {
+export function constantTimeEqual(a, b) {
   if (typeof a !== 'string' || typeof b !== 'string') return false;
   if (a.length !== b.length) return false;
   let mismatch = 0;
@@ -179,7 +179,7 @@ export async function verifyToken(token, secret) {
 }
 
 export function publicUser(user) {
-  return { id: user.id, username: user.username };
+  return { id: user.id, username: user.username, createdAt: Number(user.createdAt) || null };
 }
 
 export async function getAuthUser(request, env) {
@@ -192,14 +192,22 @@ export async function getAuthUser(request, env) {
     if (Number(session.refreshExp) > 0 && Date.now() > Number(session.refreshExp)) return null;
   }
   const user = await getJson(env, `user:${payload.uid}`);
-  return user || null;
+  if (!user) return null;
+  // Password change/reset sets sessionsValidAfter; older sessions are no longer valid.
+  if (payload.sid && Number(user.sessionsValidAfter) > 0) {
+    const session = await getJson(env, authSessionKey(payload.sid), null);
+    if (!session || Number(session.createdAt) < Number(user.sessionsValidAfter)) return null;
+  }
+  return user;
 }
 
 export function isAdminUser(user, env) {
   if (!user) return false;
   const adminUserId = String((env && env.ADMIN_USER_ID) || '').trim();
   if (adminUserId && String(user.id || '') === adminUserId) return true;
-  const adminUsername = normalizeUsername((env && env.ADMIN_USERNAME) || 'sampire');
+  // No default username: without explicit config, nobody is admin.
+  const adminUsername = normalizeUsername((env && env.ADMIN_USERNAME) || '');
+  if (!adminUsername) return false;
   return normalizeUsername(user.usernameNorm || user.username || '') === adminUsername;
 }
 

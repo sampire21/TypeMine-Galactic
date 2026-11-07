@@ -8617,6 +8617,7 @@
     <button class="mode-tab" data-mode="quotes" onclick="setMode('quotes')">Quotes</button>
     <button class="mode-tab active" data-mode="words" onclick="setMode('words')">Random Words</button>
     <button class="mode-tab" data-mode="words30" onclick="setMode('words30')">Words 30s</button>
+    <button class="mode-tab" data-mode="adaptive" onclick="setMode('adaptive')" title="Drills built from your slowest and most-missed keys">Adaptive</button>
     <button class="mode-tab" data-mode="daily" onclick="setMode('daily')">Challenges</button>
 </div>
 <div class="community-mode-popup" id="community-mode-popup" aria-live="polite">
@@ -8656,6 +8657,7 @@
     <div class="progress-bar">
         <div class="progress-fill" id="progress"></div>
     </div>
+    <div id="ghost-delta-slot" aria-live="off"></div>
 
     <div class="quote-display" id="quote-display" onclick="focusInput()"><div class="mobile-tap-hint" id="mobile-tap-hint">Tap here to start typing</div></div>
     <div class="mining-laser-overlay" id="mining-laser-overlay" aria-hidden="true">
@@ -8719,7 +8721,7 @@
             <div class="leaderboard-modal-title" id="sector-map-title">Sector Map</div>
             <button type="button" class="leaderboard-modal-close secondary" onclick="closeSectorMap()" aria-label="Close sector map">X</button>
         </div>
-        <div class="sector-map-soon-banner">Sector Map Coming Soon!</div>
+        <div class="sector-map-soon-banner">More sectors coming online soon</div>
         <div class="sector-map-wrap">
             <svg id="sector-map-svg" class="sector-map-svg" viewBox="0 0 1200 720" xmlns="http://www.w3.org/2000/svg" aria-label="Sector map systems and constellation routes">
                 <defs>
@@ -9074,9 +9076,10 @@
             <button type="button" class="leaderboard-modal-close secondary" onclick="closeDeleteAccountConfirm()" aria-label="Close delete account confirmation">X</button>
         </div>
         <div class="delete-confirm-title">Delete your account permanently</div>
-        <div class="delete-confirm-desc" id="delete-account-desc">Type your username to confirm account deletion.</div>
+        <div class="delete-confirm-desc" id="delete-account-desc">Type your username and password to confirm account deletion.</div>
         <div class="account-manage-row">
             <input id="delete-account-username-confirm" type="text" maxlength="24" autocomplete="off" placeholder="type username to confirm">
+            <input id="delete-account-password-confirm" type="password" autocomplete="current-password" placeholder="current password">
         </div>
         <div class="signup-modal-actions">
             <button type="button" class="secondary" onclick="closeDeleteAccountConfirm()">Cancel</button>
@@ -9193,6 +9196,7 @@
                     </div>
                 </div>
                 <canvas id="wpm-chart-result" class="wpm-chart wpm-chart--result" aria-hidden="true"></canvas>
+                <div id="run-analysis-container"></div>
             </div>
         </div>
     </div>
@@ -9200,38 +9204,18 @@
 
 <script src="bible-verses.js"></script>
 <script src="js/mining-mode.js"></script>
+<script src="js/adaptive-practice.js"></script>
+<script src="js/run-analysis.js"></script>
+<script src="js/orion-mode.js"></script>
 <script>
 const APP_STORAGE_SCHEMA_KEY = 'sampire-storage-schema-version';
 const APP_STORAGE_SCHEMA_VERSION = '2026-03-08.1';
 
 function migrateStorageSchemaOnce() {
+    // Stamp the schema version only. Never delete player data here: an earlier
+    // version wiped every sampire-* key, destroying progress for returning players.
     try {
-        const current = localStorage.getItem(APP_STORAGE_SCHEMA_KEY) || '';
-        if (current === APP_STORAGE_SCHEMA_VERSION) return;
-
-        const keepLocal = new Map();
-        for (const key of ['sampire-auth-token']) {
-            const value = localStorage.getItem(key);
-            if (value != null) keepLocal.set(key, value);
-        }
-
-        const localKeysToRemove = [];
-        for (let i = 0; i < localStorage.length; i++) {
-            const key = localStorage.key(i);
-            if (!key) continue;
-            if (key.startsWith('sampire-')) localKeysToRemove.push(key);
-        }
-        for (const key of localKeysToRemove) localStorage.removeItem(key);
-        for (const [key, value] of keepLocal.entries()) localStorage.setItem(key, value);
-
-        const sessionKeysToRemove = [];
-        for (let i = 0; i < sessionStorage.length; i++) {
-            const key = sessionStorage.key(i);
-            if (!key) continue;
-            if (key.startsWith('sampire-')) sessionKeysToRemove.push(key);
-        }
-        for (const key of sessionKeysToRemove) sessionStorage.removeItem(key);
-
+        if (localStorage.getItem(APP_STORAGE_SCHEMA_KEY) === APP_STORAGE_SCHEMA_VERSION) return;
         localStorage.setItem(APP_STORAGE_SCHEMA_KEY, APP_STORAGE_SCHEMA_VERSION);
     } catch (e) {
         // If storage is unavailable, continue boot without migration.
@@ -9555,6 +9539,11 @@ function setMode(mode) {
     const panel = document.getElementById('challenge-panel');
     const area  = document.getElementById('typing-area');
     if (mode === 'daily') {
+        clearInterval(timerHandle);
+        timerHandle = null;
+        startTime = null;
+        isComplete = false;
+        resultsPendingOpen = false;
         if (sfxReady && previousMode !== 'daily') playSound(SFX.changeMode);
         if (panel) panel.style.display = 'block';
         if (area)  area.style.display  = 'none';
@@ -9749,6 +9738,15 @@ function newTest(fromModeSwitch = false) {
         } else {
             init(q.text, q.source);
         }
+    } else if (currentMode === 'adaptive') {
+        const drill = window.AdaptivePractice
+            ? AdaptivePractice.generateDrill({ wordCount: 40, wordPool: WORD_LIST })
+            : '';
+        const weak = window.AdaptivePractice ? AdaptivePractice.getWeakKeys(3) : [];
+        const weakLabel = weak.length
+            ? 'Focus: ' + weak.map(w => (w && (w.char || w.key)) || w).join(', ')
+            : 'Calibrating: keep typing to find your weak keys';
+        init(drill || generateWordTest(), `Adaptive Practice \u2022 ${weakLabel}`);
     } else if (currentMode === 'words30') {
         if (activeCommunityBoostMode === 'kinetic_shielding') {
             const baseline = Number(communityModeRuntime && communityModeRuntime.baselineWpm) || 35;
@@ -9913,6 +9911,44 @@ function recordAttemptTimelinePoint() {
 // ── DOM refs ───────────────────────────────────────────────────────────────
 const quoteDisplay      = document.getElementById('quote-display');
 const hiddenInput       = document.getElementById('hidden-input');
+// Zero-width sentinel kept in the hidden input so soft-keyboard Backspace has something to delete
+const HIDDEN_INPUT_SENTINEL = '\u200B';
+let keydownHandledInput = false; // set when keydown already consumed a printable key
+function resetHiddenInput() {
+    hiddenInput.value = HIDDEN_INPUT_SENTINEL;
+    try { hiddenInput.setSelectionRange(HIDDEN_INPUT_SENTINEL.length, HIDDEN_INPUT_SENTINEL.length); } catch (e) {}
+}
+const TYPED_CHAR_MAP = {
+    '\u2018': "'", '\u2019': "'", '\u201A': "'", '\u201B': "'",
+    '\u201C': '"', '\u201D': '"', '\u201E': '"', '\u201F': '"',
+    '\u2013': '-', '\u2014': '-', '\u2212': '-',
+    '\u2026': '.', '\u00A0': ' ', '\u202F': ' ', '\u2009': ' ',
+};
+// Single char in, single char out (an ellipsis is treated as '.')
+function normalizeTypedChar(ch) {
+    const c = String(ch == null ? '' : ch);
+    return Object.prototype.hasOwnProperty.call(TYPED_CHAR_MAP, c) ? TYPED_CHAR_MAP[c] : c;
+}
+function stripCharAccents(ch) {
+    return ch.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+// True if the typed char satisfies the target char. An accented target also accepts its base letter.
+function typedCharMatches(typed, target) {
+    const t = normalizeTypedChar(typed);
+    const g = normalizeTypedChar(target);
+    if (t === g) return true;
+    const base = stripCharAccents(g);
+    return base !== g && stripCharAccents(t) === base;
+}
+function isImeKeydown(e) {
+    return !!(e.isComposing || e.keyCode === 229 || e.key === 'Process' || e.key === 'Dead' || e.key === 'Unidentified');
+}
+// Printable key, including AltGr (reported as ctrl+alt on Windows)
+function isPrintableKeyEvent(e) {
+    if (!e.key || e.key.length !== 1 || e.metaKey) return false;
+    if (!e.ctrlKey && !e.altKey) return true;
+    return (e.ctrlKey && e.altKey) || !!(e.getModifierState && e.getModifierState('AltGraph'));
+}
 const lyraQuoteDisplay  = document.getElementById('lyra-quote-display');
 const wpmEl             = document.getElementById('wpm');
 const accuracyEl        = document.getElementById('accuracy');
@@ -9946,6 +9982,8 @@ function init(quote, source = '') {
     resultsPendingOpen = false;
     ghostChars   = Array.isArray(pendingGhostChars) ? pendingGhostChars.slice() : [];
     ghostTimeline = Array.isArray(pendingGhostTimeline) ? pendingGhostTimeline.slice() : [];
+    adaptiveLastKeyAt = 0;
+    if (window.RunAnalysis) RunAnalysis.ghostDelta.reset();
     ghostReplayIndex = (ghostCursorEnabled && ghostTimeline.length > 0) ? ghostTimeline[0].index : -1;
     attemptTimeline = [];
     pendingGhostChars = null;
@@ -10018,7 +10056,7 @@ function extendWordBuffer() {
 }
 
 function focusInput() {
-    hiddenInput.value = '';
+    resetHiddenInput();
     try {
         hiddenInput.focus({ preventScroll: true });
     } catch (e) {
@@ -10570,16 +10608,16 @@ function getWPM(elapsed) {
 
 function getRawWPM(elapsed) {
     if (!elapsed) return 0;
-    // Raw WPM counts every keystroke (forward + backspaces), matching industry standard.
-    return Math.round(((keyStrokes + backspaces) / 5) / (elapsed / 60));
+    // Raw WPM counts every typed character (backspaces are not keystrokes here).
+    return Math.round((keyStrokes / 5) / (elapsed / 60));
 }
 
 function getAccuracy() {
-    if (currentIndex === 0) return null;
-    let correct = 0;
-    for (let i = 0; i < currentIndex; i++)
-        if (typedChars[i] === currentQuote[i]) correct++;
-    return Math.round((correct / currentIndex) * 100);
+    // Keystroke-based (Monkeytype style): corrected mistakes still count as errors.
+    if (keyStrokes === 0) return null;
+    const pct = Math.max(0, Math.round(((keyStrokes - mistakeCount) / keyStrokes) * 100));
+    // Never show a perfect 100% once any mistake was made, even if it was corrected.
+    return mistakeCount > 0 ? Math.min(pct, 99) : pct;
 }
 
 function getConsistency() {
@@ -10596,7 +10634,7 @@ function getConsistency() {
 function updateStats() {
     const elapsed  = getElapsed();
     const acc = getAccuracy();
-    wpmEl.textContent      = getWPM(elapsed);
+    wpmEl.textContent      = elapsed >= 1 ? getWPM(elapsed) : 0;
     accuracyEl.textContent = acc !== null ? acc + '%' : '—';
     const progress = isTimedMode()
         ? Math.min(100, (elapsed / RANDOM_WORDS_DURATION) * 100)
@@ -10721,7 +10759,7 @@ function drawLineChart(canvas, samples) {
 function sampleWpm() {
     const elapsed = getElapsed();
     const sec     = Math.floor(elapsed);
-    if (sec > lastSampleSec) {
+    if (sec >= 1 && sec > lastSampleSec) {
         lastSampleSec = sec;
         wpmSamples.push({ t: sec, wpm: getWPM(elapsed) });
     }
@@ -10763,6 +10801,7 @@ function startTimer() {
         }
         sampleWpm();
         updateLiveChart();
+        updateGhostDelta(elapsed * 1000);
         if (ghostCursorEnabled && ghostTimeline.length > 0) {
             const nextGhost = Math.max(0, Math.min(currentQuote.length - 1, getGhostIndexAtElapsed(elapsed)));
             if (nextGhost !== ghostReplayIndex) {
@@ -11680,6 +11719,11 @@ async function localApiFetch(url, options = {}, headers = {}) {
         const user = users[userIdx];
         const usernameConfirm = String(body.usernameConfirm || '').trim();
         if (usernameConfirm !== user.username) localApiError(400, 'Username confirmation does not match');
+        const currentPassword = body.currentPassword != null ? String(body.currentPassword) : '';
+        const validPassword = user.passwordHash
+            ? (await localHashPassword(currentPassword, user.passwordSalt)) === user.passwordHash
+            : user.password === currentPassword;
+        if (!validPassword) localApiError(401, 'Current password is incorrect');
 
         users.splice(userIdx, 1);
         saveLocalJson(LOCAL_AUTH_USERS_KEY, users);
@@ -11818,7 +11862,7 @@ async function localApiFetch(url, options = {}, headers = {}) {
         if (method === 'PATCH') {
             const DAILY_IDS = ['nobackspace', 'sprint', 'perfectionist', 'daily_quotes_5', 'daily_words_5', 'daily_words30_5'];
             const WEEKLY_IDS = ['marathon', 'consistent_climber', 'rival_week', 'above_average'];
-            const ACHIEVEMENT_IDS = ['sonic_boom', 'speed_demon', 'flawless', 'midnight_oil', 'streak_master', 'triple_crown', 'founder', 'human_lectionary'];
+            const ACHIEVEMENT_IDS = BADGE_DEFS.map((def) => def.id);
             const clampInt = (value, min, max = Infinity) => {
                 const n = Math.floor(Number(value));
                 if (!Number.isFinite(n)) return null;
@@ -12815,6 +12859,7 @@ let _lbRowsCache = [];
 let _communityRowsCache = [];
 let lbActiveTab = 'alltime';
 let leaderboardReqId = 0;
+let communityHubReqId = 0;
 let adminUsersCache = [];
 let adminSelectedUserId = '';
 const lbUserSummaryCache = new Map();
@@ -13058,6 +13103,18 @@ const LYRA_WORDS_PER_ASTEROID = 30;
 const LYRA_ASTEROIDS_TO_CLEAR = 15;
 const LYRA_VISIBLE_WORD_WINDOW = 18;
 let lyraStatsInterval = null;
+let lyraSetupGeneration = 0;
+let lyraSetupInFlight = false;
+let lyraAsteroidCycleTimer = null;
+let lyraShipFlyAwayTimer = null;
+let lyraHudFrame = 0;
+let lyraSceneAnchorCache = null;
+let lyraLastAsteroidDisplaySize = 0;
+let lyraPanelHtmlCache = {};
+let lyraCommunityFlushInterval = null;
+const lyraPendingTimeouts = new Set();
+const LYRA_COMMUNITY_FLUSH_MS = 60000;
+const LYRA_COMMUNITY_MAX_WORDS_PER_CALL = 2000;
 const LYRA_DAMAGE_POPUP_POOL_SIZE = 100;
 let lyraGateState = {
     words: [],
@@ -13100,6 +13157,44 @@ function isLyraGateOpen() {
     return !!document.getElementById('lyra-gate-modal')?.classList.contains('show');
 }
 
+function scheduleLyraTimeout(fn, delay) {
+    const handle = setTimeout(() => {
+        lyraPendingTimeouts.delete(handle);
+        if (!isLyraGateOpen()) return;
+        fn();
+    }, delay);
+    lyraPendingTimeouts.add(handle);
+    return handle;
+}
+
+function clearLyraPendingTimeouts() {
+    for (const handle of lyraPendingTimeouts) clearTimeout(handle);
+    lyraPendingTimeouts.clear();
+    if (lyraAsteroidCycleTimer) { clearTimeout(lyraAsteroidCycleTimer); lyraAsteroidCycleTimer = null; }
+    if (lyraShipFlyAwayTimer) { clearTimeout(lyraShipFlyAwayTimer); lyraShipFlyAwayTimer = null; }
+}
+
+function invalidateLyraSceneAnchors() {
+    lyraSceneAnchorCache = null;
+}
+
+function setLyraText(el, text) {
+    if (el && el.textContent !== text) el.textContent = text;
+}
+
+// Only touch a panel's DOM when its rendered HTML actually changed, so hover/focus/clicks survive.
+function setLyraPanelHtml(panel, html) {
+    if (!panel) return;
+    if (lyraPanelHtmlCache[panel.id] === html && panel.childElementCount > 0) return;
+    lyraPanelHtmlCache[panel.id] = html;
+    panel.innerHTML = html;
+}
+
+function startLyraStatsInterval() {
+    if (lyraStatsInterval) clearInterval(lyraStatsInterval);
+    lyraStatsInterval = setInterval(updateLyraStats, 500);
+}
+
 function randomizeLyraAsteroidSeed() {
     lyraGateState.asteroidSeed = Math.floor(Math.random() * 1e9);
 }
@@ -13118,11 +13213,13 @@ function normalizeLyraChar(char) {
 }
 
 function lyraCharsMatch(a, b) {
-    return normalizeLyraChar(a) === normalizeLyraChar(b);
+    return typedCharMatches(normalizeLyraChar(a), normalizeLyraChar(b));
 }
 
 function lyraWordsMatch(attempt, target) {
-    return normalizeLyraChar(attempt) === normalizeLyraChar(target);
+    const x = Array.from(String(attempt || ''));
+    const y = Array.from(String(target || ''));
+    return x.length === y.length && x.every((ch, i) => lyraCharsMatch(ch, y[i]));
 }
 
 function getLyraCurrentStoryWords() {
@@ -13152,11 +13249,15 @@ function setLyraStoryLoadingState(patch) {
 
 function getLyraStoryWindow(startIndex, count) {
     const storyWords = getLyraCurrentStoryWords();
-    if (!storyWords.length) return ['loading', 'story'];
+    if (!storyWords.length) return [];
     const start = Math.max(0, Math.floor(Number(startIndex) || 0));
     const size = Math.max(1, Math.floor(Number(count) || 1));
-    const slice = storyWords.slice(start, start + size);
-    return slice.length ? slice : ['the', 'end'];
+    return storyWords.slice(start, start + size);
+}
+
+function isLyraStoryComplete() {
+    const storyWords = getLyraCurrentStoryWords();
+    return storyWords.length > 0 && lyraGateState.storyBaseIndex >= storyWords.length;
 }
 
 function normalizeLyraStoryChar(char) {
@@ -13246,7 +13347,7 @@ async function loadLyraStoryBook(bookId, options = {}) {
         ? api.getStoryBookDefinition(bookId)
         : null;
     if (!book || book.locked || !book.assetPath) return [];
-    if (!options.force && lyraStoryLibraryCache.has(book.id)) {
+    if (!options.force && (lyraStoryLibraryCache.get(book.id) || []).length > 0) {
         return lyraStoryLibraryCache.get(book.id);
     }
     setLyraStoryLoadingState({
@@ -13294,7 +13395,7 @@ async function loadLyraStoryBook(bookId, options = {}) {
                 });
             });
         }
-        lyraStoryLibraryCache.set(book.id, words);
+        if (words.length > 0) lyraStoryLibraryCache.set(book.id, words);
         setLyraStoryLoadingState({
             active: true,
             progress: 100,
@@ -13313,11 +13414,16 @@ async function loadLyraStoryBook(bookId, options = {}) {
     }
 }
 
-function primeLyraCurrentStoryBook() {
+function primeLyraCurrentStoryBook(force = false) {
     const bookId = getLyraCurrentStoryBookId();
-    lyraStoryLoadPromise = loadLyraStoryBook(bookId, { force: true }).catch((error) => {
+    lyraStoryLoadPromise = loadLyraStoryBook(bookId, { force: !!force }).then((words) => {
+        if (!words.length) {
+            showUiMessage('Story is unavailable right now. Using random words instead.', 'error', 2600, 'top-right');
+        }
+        return words;
+    }).catch((error) => {
         console.error('Lyra story fetch failed', error);
-        showUiMessage('Story Mode failed to load that book.', 'error', 2200, 'top-right');
+        showUiMessage('Story Mode failed to load that book. Using random words instead.', 'error', 2600, 'top-right');
         return [];
     });
     return lyraStoryLoadPromise;
@@ -13381,15 +13487,19 @@ function restartLyraStoryProgress(scope) {
     const updated = api.setCurrentStoryProgress(lyraMiningState, targetIndex);
     lyraMiningState = updated.state;
     closeLyraStoryResetMenu();
+    const restartSplash = document.querySelector('.lyra-clear-splash');
+    if (restartSplash) restartSplash.remove();
     if (lyraStatsInterval) {
         clearInterval(lyraStatsInterval);
         lyraStatsInterval = null;
     }
     resetLyraGateState();
+    resetLyraSceneForNextAsteroid();
     renderLyraWordStream();
     renderLyraMiningHud();
     renderLyraMiningSidebar();
     updateLyraStats();
+    if (isLyraGateOpen()) startLyraStatsInterval();
     focusLyraInput();
     showUiMessage(
         scope === 'book' ? 'Story progress reset to the beginning of the book.' : 'Story progress reset to the start of this chapter.',
@@ -13415,6 +13525,7 @@ function ensureLyraWordsBuffer(minWordCount = 120) {
 }
 
 function resetLyraGateState() {
+    clearLyraPendingTimeouts();
     const storyBaseIndex = Math.max(0, Math.floor(Number(lyraMiningState && lyraMiningState.currentStoryProgress) || 0));
     lyraGateState = {
         words: getLyraStoryWindow(storyBaseIndex, LYRA_VISIBLE_WORD_WINDOW),
@@ -13575,6 +13686,10 @@ function updateLyraAsteroidVisualState() {
     const band = getLyraAsteroidHealthBand(lyraMiningState);
     const displaySize = getLyraAsteroidDisplaySize(lyraMiningState);
     asteroid.dataset.healthBand = band;
+    if (displaySize !== lyraLastAsteroidDisplaySize) {
+        lyraLastAsteroidDisplaySize = displaySize;
+        invalidateLyraSceneAnchors();
+    }
     wrap.style.setProperty('--lyra-asteroid-size', `${displaySize}px`);
     if (band === 'critical') wrap.style.setProperty('--lyra-asteroid-glow', 'rgba(248, 198, 96, 0.4)');
     else if (band === 'fractured') wrap.style.setProperty('--lyra-asteroid-glow', 'rgba(102, 233, 255, 0.34)');
@@ -13663,9 +13778,16 @@ function startLyraDroneOrbitLoop() {
 
 function renderLyraMiningDrones() {
     const layer = document.getElementById('lyra-drone-layer');
-    const anchors = getLyraSceneAnchors();
-    if (!layer || !anchors) return;
+    if (!layer) return;
     const count = getLyraDroneCount();
+    // Rebuild only when the drone count changes (or the layer was cleared).
+    if (layer.childElementCount === count && lyraDroneOrbitState.length === count) {
+        if (count > 0) startLyraDroneOrbitLoop();
+        else stopLyraDroneOrbitLoop();
+        return;
+    }
+    const anchors = getLyraSceneAnchors();
+    if (!anchors) return;
     layer.innerHTML = '';
     ensureLyraDroneOrbitState(count);
     if (count <= 0) {
@@ -13793,7 +13915,7 @@ function emitLyraDroneVolley(options = {}) {
         laserLayer.appendChild(impact);
         impact.addEventListener('animationend', () => impact.remove(), { once: true });
         flashLyraAsteroidHit();
-        setTimeout(() => emitLyraAsteroidChunks(1 + Math.floor(Math.random() * 2)), 42);
+        scheduleLyraTimeout(() => emitLyraAsteroidChunks(1 + Math.floor(Math.random() * 2)), 42);
         const popupValue = Number(popupValues[index]) || 0;
         if (popupValue > 0) {
             spawnLyraDamagePopup(popupValue, {
@@ -13850,6 +13972,7 @@ function resizeLyraPopupCanvas() {
     canvas.height = Math.max(1, Math.round(rect.height * dpr));
     canvas.style.width = `${Math.round(rect.width)}px`;
     canvas.style.height = `${Math.round(rect.height)}px`;
+    if (rect.width > 0 && rect.height > 0) canvas.dataset.lyraSized = '1';
     const ctx = canvas.getContext('2d');
     if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
@@ -13916,7 +14039,9 @@ function spawnLyraDamagePopup(value, options = {}) {
     const anchors = getLyraSceneAnchors();
     if (!anchors) return;
     ensureLyraDamagePopupPool();
-    resizeLyraPopupCanvas();
+    // Resizing clears the canvas; it happens on window resize and gate open. Only size it here if never sized.
+    const popupCanvas = document.getElementById('lyra-popup-canvas');
+    if (popupCanvas && !popupCanvas.dataset.lyraSized) resizeLyraPopupCanvas();
     let popup = lyraDamagePopupPool.find((entry) => !entry.active);
     if (!popup) popup = lyraDamagePopupPool.reduce((oldest, entry) => (entry.age > oldest.age ? entry : oldest), lyraDamagePopupPool[0]);
     const isCritical = !!options.isCritical;
@@ -13994,19 +14119,22 @@ async function selectLyraStoryBook(bookId) {
     const book = typeof api.getStoryBookDefinition === 'function' ? api.getStoryBookDefinition(bookId) : null;
     if (!book || book.locked) return;
     try {
-        await loadLyraStoryBook(bookId, { force: true });
+        await loadLyraStoryBook(bookId);
         const selection = api.setCurrentStoryBook(lyraMiningState, bookId);
         lyraMiningState = selection.state;
         if (lyraStatsInterval) {
             clearInterval(lyraStatsInterval);
             lyraStatsInterval = null;
         }
+        const bookSplash = document.querySelector('.lyra-clear-splash');
+        if (bookSplash) bookSplash.remove();
         resetLyraGateState();
         resetLyraSceneForNextAsteroid();
         renderLyraWordStream();
         renderLyraMiningHud();
         renderLyraMiningSidebar();
         updateLyraStats();
+        if (isLyraGateOpen()) startLyraStatsInterval();
         focusLyraInput();
     } catch (error) {
         console.error('selectLyraStoryBook failed', error);
@@ -14021,7 +14149,7 @@ function renderLyraLibraryPanel() {
     if (!panel || !api || !lyraMiningState) return;
     const books = getLyraStoryLibrary();
     const activeBookId = getLyraCurrentStoryBookId();
-    panel.innerHTML = `
+    const html = `
         <div class="lyra-library-panel">
             <div class="lyra-library-card">
                 <div class="lyra-library-head">
@@ -14055,6 +14183,7 @@ function renderLyraLibraryPanel() {
             </div>
         </div>
     `;
+    setLyraPanelHtml(panel, html);
 }
 
 function renderLyraDroneSpecializationPanel() {
@@ -14065,7 +14194,7 @@ function renderLyraDroneSpecializationPanel() {
     const unlocked = dronesLevel >= 10;
     const currentSpec = lyraMiningState.droneSpecialization || '';
     if (!unlocked) {
-        panel.innerHTML = `
+        const lockedHtml = `
             <div class="lyra-specialization-card locked">
                 <div class="lyra-specialization-head">
                     <div class="lyra-specialization-label">Drone Firmware</div>
@@ -14074,9 +14203,10 @@ function renderLyraDroneSpecializationPanel() {
                 <div class="lyra-specialization-desc">Reach Automated Limpet Drones level 10 to unlock Swarm, Precision, and Salvage firmware paths.</div>
             </div>
         `;
+        setLyraPanelHtml(panel, lockedHtml);
         return;
     }
-    panel.innerHTML = `
+    const html = `
         <div class="lyra-specialization-panel">
         <div class="lyra-specialization-card">
             <div class="lyra-specialization-head">
@@ -14085,20 +14215,26 @@ function renderLyraDroneSpecializationPanel() {
             </div>
             <div class="lyra-specialization-desc">Firmware paths reshape passive mining behavior once the limpet network is mature enough.</div>
             <div class="lyra-specialization-options">
-                ${api.DRONE_SPECIALIZATIONS.map((spec) => `
+                ${api.DRONE_SPECIALIZATIONS.map((spec) => {
+                    const needLevel = Number(spec.unlockLevel) || 10;
+                    const specLocked = dronesLevel < needLevel;
+                    return `
                     <button
                         type="button"
                         class="lyra-specialization-option${currentSpec === spec.id ? ' active' : ''}"
                         onclick="setLyraDroneSpecialization('${spec.id}')"
+                        ${specLocked ? 'disabled aria-disabled="true"' : ''}
                     >
                         <strong>${escapeHtml(spec.name)}</strong>
-                        <span>${escapeHtml(spec.description)}</span>
+                        <span>${specLocked ? `Unlocks at drone level ${needLevel}` : escapeHtml(spec.description)}</span>
                     </button>
-                `).join('')}
+                `;
+                }).join('')}
             </div>
         </div>
         </div>
     `;
+    setLyraPanelHtml(panel, html);
 }
 
 function renderLyraStatisticsPanel() {
@@ -14110,7 +14246,7 @@ function renderLyraStatisticsPanel() {
     const accuracy = Math.round(getLyraAccuracyRatio() * 100);
     const overloadMeter = effectiveStats ? Math.round(effectiveStats.overloadMeter) : 0;
     const overloadState = effectiveStats && effectiveStats.overloadActive ? 'Active' : overloadMeter >= 100 ? 'Primed' : 'Charging';
-    panel.innerHTML = `
+    const html = `
         <div class="lyra-statistics-panel">
             <div class="lyra-stat-card">
                 <div class="lyra-stat-card-title">Mining Telemetry</div>
@@ -14132,6 +14268,7 @@ function renderLyraStatisticsPanel() {
             </div>
         </div>
     `;
+    setLyraPanelHtml(panel, html);
 }
 
 function renderLyraMiningSidebar() {
@@ -14148,9 +14285,9 @@ function renderLyraMiningSidebar() {
         ? api.getEffectiveMiningStats(lyraMiningState, Date.now())
         : null;
     const displayDps = getLyraDisplayedDps(effectiveStats);
-    if (crystalsEl) crystalsEl.textContent = formatMiningNumber(wallet);
-    if (layerEl) layerEl.textContent = formatMiningNumber((Number(lyraMiningState.currentLayer) || 0) + 1);
-    if (dpsEl) dpsEl.textContent = formatMiningNumber(displayDps || effects.dps);
+    setLyraText(crystalsEl, formatMiningNumber(wallet));
+    setLyraText(layerEl, formatMiningNumber((Number(lyraMiningState.currentLayer) || 0) + 1));
+    setLyraText(dpsEl, formatMiningNumber(displayDps || effects.dps));
     const visibleUpgrades = api.MINING_UPGRADES.filter((upgrade) => ['automation', 'active', 'bridge', 'critical'].includes(upgrade.category));
     if (!visibleUpgrades.some((upgrade) => upgrade.id === lyraSelectedUpgradeId)) {
         lyraSelectedUpgradeId = visibleUpgrades[0] ? visibleUpgrades[0].id : '';
@@ -14171,7 +14308,7 @@ function renderLyraMiningSidebar() {
                     : selectedUpgrade.id === 'neural_focus'
                         ? `+${Math.round((selectedEffect.critChanceBonus || 0) * 100)}% crit chance`
                         : `+${Number(selectedEffect.critMultiplierBonus || 0).toFixed(1)}x crit damage`;
-    systemsPanel.innerHTML = `
+    const systemsHtml = `
         <div class="lyra-systems-panel">
         <div class="lyra-upgrade-list">
         ${visibleUpgrades.map((upgrade) => {
@@ -14218,6 +14355,7 @@ function renderLyraMiningSidebar() {
         ` : ''}
         </div>
     `;
+    setLyraPanelHtml(systemsPanel, systemsHtml);
     renderLyraLibraryPanel();
     renderLyraDroneSpecializationPanel();
     renderLyraStatisticsPanel();
@@ -14274,6 +14412,14 @@ function updateLyraOverloadVisualState(stats = null) {
 }
 
 function renderLyraMiningHud() {
+    if (lyraHudFrame) return;
+    lyraHudFrame = requestAnimationFrame(() => {
+        lyraHudFrame = 0;
+        renderLyraMiningHudNow();
+    });
+}
+
+function renderLyraMiningHudNow() {
     const progressEl = document.getElementById('lyra-progress-text');
     const hpEl = document.getElementById('lyra-scene-hp');
     const dpsEl = document.getElementById('lyra-scene-dps');
@@ -14285,10 +14431,10 @@ function renderLyraMiningHud() {
     const effectiveStats = getLyraEffectiveMiningStats();
     const displayDps = getLyraDisplayedDps(effectiveStats);
     const progressText = `Layer ${formatMiningNumber((Number(lyraMiningState.currentLayer) || 0) + 1)} · HP ${formatMiningNumber(hp)} / ${formatMiningNumber(maxHp)} · Combo ${comboText}`;
-    if (progressEl) progressEl.textContent = progressText;
-    if (hpEl) hpEl.textContent = `${formatMiningNumber(hp)} / ${formatMiningNumber(maxHp)}`;
-    if (dpsEl) dpsEl.textContent = formatMiningNumber(displayDps);
-    if (comboEl) comboEl.textContent = comboText;
+    setLyraText(progressEl, progressText);
+    setLyraText(hpEl, `${formatMiningNumber(hp)} / ${formatMiningNumber(maxHp)}`);
+    setLyraText(dpsEl, formatMiningNumber(displayDps));
+    setLyraText(comboEl, comboText);
     updateLyraAsteroidVisualState();
     updateLyraOverloadVisualState(effectiveStats);
     renderLyraMiningDrones();
@@ -14334,7 +14480,7 @@ function tickLyraMiningPassiveDamage() {
         for (let i = 0; i < volleyRepeats; i++) {
             const start = i * droneCount;
             const end = start + droneCount;
-            setTimeout(() => emitLyraDroneVolley({
+            scheduleLyraTimeout(() => emitLyraDroneVolley({
                 popupValues: popupShares.slice(start, end),
                 isCritical: !!ticked.passiveCritApplied,
                 isOverloadActive: !!ticked.overloadActive,
@@ -14398,21 +14544,112 @@ function triggerLyraOverload(source = 'key') {
 }
 window.triggerLyraOverload = triggerLyraOverload;
 
-async function setupLyraMiningMode() {
+// Resolves true when this setup is still the latest one and finished; false if superseded.
+async function setupLyraMiningMode(options = {}) {
     const api = getMiningApi();
-    if (!api) return;
-    syncLyraMiningStateWithWallet(api.loadMiningState());
-    await primeLyraCurrentStoryBook();
-    const prevCrystals = lyraMiningState.totalAetherCrystals;
-    const ticked = api.tickMiningState(lyraMiningState, Date.now());
-    lyraMiningState = ticked.state;
-    syncLyraWalletFromMiningState(prevCrystals);
-    resizeLyraPopupCanvas();
-    renderLyraMiningHud();
-    setLyraSidebarTab(lyraSidebarTab);
+    const generation = ++lyraSetupGeneration;
+    if (!api) {
+        lyraSetupInFlight = false;
+        return true;
+    }
+    lyraSetupInFlight = true;
+    try {
+        syncLyraMiningStateWithWallet(api.loadMiningState());
+        await primeLyraCurrentStoryBook(!!options.force);
+        if (generation !== lyraSetupGeneration) return false;
+        const prevCrystals = lyraMiningState.totalAetherCrystals;
+        const ticked = api.tickMiningState(lyraMiningState, Date.now());
+        lyraMiningState = ticked.state;
+        syncLyraWalletFromMiningState(prevCrystals);
+        invalidateLyraSceneAnchors();
+        resizeLyraPopupCanvas();
+        renderLyraMiningHud();
+        setLyraSidebarTab(lyraSidebarTab);
+        lyraSetupInFlight = false;
+        return true;
+    } catch (error) {
+        if (generation === lyraSetupGeneration) lyraSetupInFlight = false;
+        throw error;
+    }
+}
+
+function handleLyraSetupFailure(error) {
+    console.error('setupLyraMiningMode failed', error);
+    lyraSetupInFlight = false;
+    showUiMessage('Lyra Gate failed to initialize. Close and reopen it to try again.', 'error', 2600, 'top-right');
+    if (!isLyraGateOpen()) return;
+    try {
+        resetLyraSceneForNextAsteroid();
+        renderLyraWordStream();
+        focusLyraInput();
+    } catch (renderError) {
+        console.error('Lyra Gate fallback render failed', renderError);
+    }
+}
+
+// Runs setup, then onReady() only if this setup is still current and the gate is open.
+function runLyraSetup(onReady, options = {}) {
+    return setupLyraMiningMode(options).then((ready) => {
+        if (!ready || !isLyraGateOpen()) return;
+        startLyraStatsInterval();
+        onReady();
+    }).catch(handleLyraSetupFailure);
+}
+
+function flushLyraCommunityDamage() {
+    const api = getMiningApi();
+    if (!api || !lyraMiningState || typeof api.flushMiningCommunityBuffer !== 'function') return;
+    let flushed = null;
+    try {
+        flushed = api.flushMiningCommunityBuffer(lyraMiningState);
+    } catch (error) {
+        console.error('flushMiningCommunityBuffer failed', error);
+        return;
+    }
+    // flushMiningCommunityBuffer persists the returned state via saveMiningState itself.
+    if (flushed && flushed.state) lyraMiningState = flushed.state;
+    const damage = Math.max(0, Math.floor(Number(flushed && flushed.damage) || 0));
+    const queued = takeLyraCommunityRetry();
+    if (damage + queued > 0) void submitLyraCommunityDamage(damage + queued);
+}
+
+const LYRA_COMMUNITY_RETRY_KEY = 'sampire-community-retry';
+const LYRA_COMMUNITY_RETRY_CAP = 20000;
+
+function takeLyraCommunityRetry() {
+    try {
+        const amount = Math.max(0, Math.floor(Number(localStorage.getItem(LYRA_COMMUNITY_RETRY_KEY)) || 0));
+        localStorage.removeItem(LYRA_COMMUNITY_RETRY_KEY);
+        return Math.min(amount, LYRA_COMMUNITY_RETRY_CAP);
+    } catch (e) { return 0; }
+}
+
+function queueLyraCommunityRetry(amount) {
+    const add = Math.max(0, Math.floor(Number(amount) || 0));
+    if (add <= 0) return;
+    try {
+        const cur = Math.max(0, Math.floor(Number(localStorage.getItem(LYRA_COMMUNITY_RETRY_KEY)) || 0));
+        localStorage.setItem(LYRA_COMMUNITY_RETRY_KEY, String(Math.min(LYRA_COMMUNITY_RETRY_CAP, cur + add)));
+    } catch (e) {}
+}
+
+// The contribute endpoint's `words` field is added directly to a contributor's damage total (max 2000 per call).
+async function submitLyraCommunityDamage(damage) {
+    let remaining = damage;
+    while (remaining > 0) {
+        const part = Math.min(LYRA_COMMUNITY_MAX_WORDS_PER_CALL, remaining);
+        const result = await submitCommunityContribution(part);
+        if (!result || !result.ok) {
+            console.warn('Lyra community contribution failed', result && result.error);
+            queueLyraCommunityRetry(remaining);
+            return;
+        }
+        remaining -= part;
+    }
 }
 
 window.addEventListener('resize', () => {
+    invalidateLyraSceneAnchors();
     if (!isLyraGateOpen()) return;
     resizeLyraPopupCanvas();
     updateLyraShipAim();
@@ -14488,6 +14725,7 @@ function renderLyraWordStream() {
     updateLyraStats();
     renderLyraMiningHud();
     renderLyraStoryMeta();
+    if (isLyraStoryComplete()) showLyraStoryCompleteSplash();
     updateLyraStoryResetMenu();
     if (stream) {
         stream.scrollLeft = 0;
@@ -14571,6 +14809,7 @@ function focusLyraInput() {
 }
 
 function getLyraSceneAnchors() {
+    if (lyraSceneAnchorCache) return lyraSceneAnchorCache;
     const scene = document.getElementById('lyra-scene');
     const asteroid = document.getElementById('lyra-asteroid-wrap');
     const ship = document.getElementById('lyra-ship');
@@ -14586,7 +14825,7 @@ function getLyraSceneAnchors() {
     const muzzleY = muzzleRect
         ? (muzzleRect.top - sRect.top) + (muzzleRect.height * 0.5)
         : (shipRect.top - sRect.top) + shipRect.height * 0.18;
-    return {
+    const anchors = {
         shipCenterX: (shipRect.left - sRect.left) + shipRect.width * 0.5,
         shipCenterY: (shipRect.top - sRect.top) + shipRect.height * 0.5,
         shipMuzzleX: muzzleX,
@@ -14596,6 +14835,9 @@ function getLyraSceneAnchors() {
         asteroidCenterY: (aRect.top - sRect.top) + aRect.height * 0.55,
         asteroidRadius: Math.max(24, Math.min(aRect.width, aRect.height) * 0.44),
     };
+    // Don't cache measurements taken while the scene is hidden or unlaid-out.
+    if (sRect.width > 0 && sRect.height > 0) lyraSceneAnchorCache = anchors;
+    return anchors;
 }
 
 function updateLyraShipAim() {
@@ -14604,7 +14846,12 @@ function updateLyraShipAim() {
     if (!anchors || !ship) return;
     // Player ship sprite points upward by default, so offset by +90deg from path angle.
     const angle = (Math.atan2(anchors.asteroidCenterY - anchors.shipCenterY, anchors.asteroidCenterX - anchors.shipCenterX) * 180 / Math.PI) + 90;
-    ship.style.setProperty('--lyra-ship-angle', `${angle.toFixed(2)}deg`);
+    const angleValue = `${angle.toFixed(2)}deg`;
+    if (ship.style.getPropertyValue('--lyra-ship-angle') !== angleValue) {
+        ship.style.setProperty('--lyra-ship-angle', angleValue);
+        // Rotating the ship moves its muzzle, so re-measure next time.
+        invalidateLyraSceneAnchors();
+    }
 }
 
 function emitLyraLaserBurst() {
@@ -14642,7 +14889,7 @@ function emitLyraLaserBurst() {
     impact.addEventListener('animationend', () => impact.remove(), { once: true });
 
     updateLyraShipAim();
-    setTimeout(() => emitLyraAsteroidChunks(1 + Math.floor(Math.random() * 2)), 42);
+    scheduleLyraTimeout(() => emitLyraAsteroidChunks(1 + Math.floor(Math.random() * 2)), 42);
     return { x: endX, y: endY };
 }
 
@@ -14717,7 +14964,7 @@ function emitLyraAsteroidChunks(count = 1) {
         chunk.style.setProperty('--dy', `${dy.toFixed(2)}px`);
         chunk.style.setProperty('--rot', `${(Math.random() * 760 - 380).toFixed(2)}deg`);
         chunkLayer.appendChild(chunk);
-        setTimeout(() => chunk.remove(), 1700);
+        scheduleLyraTimeout(() => chunk.remove(), 1700);
     }
 }
 
@@ -14770,6 +15017,7 @@ function resetLyraSceneForNextAsteroid() {
     if (ship) ship.classList.remove('fly-away');
     if (drones) drones.innerHTML = '';
     stopLyraDroneOrbitLoop();
+    invalidateLyraSceneAnchors();
     if (lasers) lasers.innerHTML = '';
     if (chunks) chunks.innerHTML = '';
     if (crystals) crystals.innerHTML = '';
@@ -14786,10 +15034,15 @@ function triggerLyraAsteroidCycle() {
     const ship = document.getElementById('lyra-ship');
     if (asteroid) asteroid.classList.add('exploding');
     emitLyraExplosionAndCrystals();
-    setTimeout(() => {
+    if (lyraShipFlyAwayTimer) clearTimeout(lyraShipFlyAwayTimer);
+    lyraShipFlyAwayTimer = setTimeout(() => {
+        lyraShipFlyAwayTimer = null;
         if (ship) ship.classList.add('fly-away');
     }, 160);
-    setTimeout(() => {
+    if (lyraAsteroidCycleTimer) clearTimeout(lyraAsteroidCycleTimer);
+    lyraAsteroidCycleTimer = setTimeout(() => {
+        lyraAsteroidCycleTimer = null;
+        if (!isLyraGateOpen()) return;
         lyraGateState.cycleBusy = false;
         resetLyraSceneForNextAsteroid();
         renderLyraWordStream();
@@ -14827,22 +15080,47 @@ function showLyraGateClearSplash() {
     wrap.appendChild(splash);
 }
 
+function showLyraStoryCompleteSplash() {
+    const wrap = document.querySelector('.lyra-gate-wrap');
+    if (!wrap || !isLyraGateOpen() || document.querySelector('.lyra-clear-splash')) return;
+    const api = getMiningApi();
+    const books = getLyraStoryLibrary().filter((book) => !book.locked && book.id !== getLyraCurrentStoryBookId());
+    const currentBook = api && typeof api.getStoryBookDefinition === 'function' ? api.getStoryBookDefinition(getLyraCurrentStoryBookId()) : null;
+    const nextBook = books[0] || null;
+    const splash = document.createElement('div');
+    splash.className = 'lyra-clear-splash';
+    splash.innerHTML = `
+        <div class="lyra-clear-title">Story Complete!</div>
+        <div class="lyra-clear-subtitle">You reached the end of ${escapeHtml(currentBook ? currentBook.name : 'this book')}</div>
+        <div class="lyra-clear-actions">
+            <button onclick="restartLyraStoryProgress('book')">Restart Book</button>
+            ${nextBook ? `<button onclick="selectLyraStoryBook('${escapeHtml(nextBook.id)}')">Next: ${escapeHtml(nextBook.name)}</button>` : ''}
+            <button onclick="closeLyraGate()">Return to Sector Map</button>
+        </div>
+    `;
+    wrap.appendChild(splash);
+}
+
 function replayLyraGate() {
     const splash = document.querySelector('.lyra-clear-splash');
     if (splash) splash.remove();
     if (lyraStatsInterval) { clearInterval(lyraStatsInterval); lyraStatsInterval = null; }
     stopLyraDamagePopupLoop();
     resetLyraGateState();
-    setupLyraMiningMode().then(() => {
+    runLyraSetup(() => {
         resetLyraSceneForNextAsteroid();
         renderLyraWordStream();
         updateLyraStats();
         focusLyraInput();
-    });
+    }, { force: getLyraCurrentStoryWords().length === 0 });
 }
 
 function handleLyraGateKeydown(e) {
     if (!isLyraGateOpen()) return false;
+    if (lyraSetupInFlight) {
+        e.preventDefault();
+        return true;
+    }
     if (lyraGateState.cycleBusy) {
         e.preventDefault();
         return true;
@@ -14855,29 +15133,44 @@ function handleLyraGateKeydown(e) {
         if (lyraStatsInterval) { clearInterval(lyraStatsInterval); lyraStatsInterval = null; }
         stopLyraDamagePopupLoop();
         resetLyraGateState();
-        setupLyraMiningMode().then(() => {
+        runLyraSetup(() => {
             resetLyraSceneForNextAsteroid();
             renderLyraWordStream();
             updateLyraStats();
             focusLyraInput();
-        });
+        }, { force: getLyraCurrentStoryWords().length === 0 });
+        return true;
+    }
+    if (!lyraGateState.words.length) {
+        // End of the book: nothing to type until the player restarts or picks another book.
+        e.preventDefault();
         return true;
     }
     const currentWord = lyraGateState.words[0] || '';
+    const lyraKey = normalizeTypedChar(e.key);
     if (e.key === 'Backspace') {
         playKeypressSound('Backspace', e);
         e.preventDefault();
-        if (e.ctrlKey || e.metaKey) {
-            lyraGateState.typed = '';
-        } else if (lyraGateState.typed.length > 0) {
-            lyraGateState.typed = lyraGateState.typed.slice(0, -1);
+        // Remove correct chars that are no longer in place so retyping doesn't inflate WPM.
+        const lyraTypedNow = lyraGateState.typed;
+        let lyraRemoveFrom = -1;
+        if (e.ctrlKey || e.metaKey) lyraRemoveFrom = 0;
+        else if (lyraTypedNow.length > 0) lyraRemoveFrom = lyraTypedNow.length - 1;
+        if (lyraRemoveFrom >= 0) {
+            for (let i = lyraRemoveFrom; i < lyraTypedNow.length; i++) {
+                if (currentWord[i] && lyraCharsMatch(lyraTypedNow[i], currentWord[i])) {
+                    lyraGateState.correctChars = Math.max(0, lyraGateState.correctChars - 1);
+                }
+            }
+            lyraGateState.typed = lyraTypedNow.slice(0, lyraRemoveFrom);
         }
         renderLyraWordStream();
         return true;
     }
-    if (e.key === ' ') {
-        playKeypressSound(' ', e);
+    if (lyraKey === ' ' && e.key.length === 1) {
         e.preventDefault();
+        if (e.repeat) return true;
+        playKeypressSound(' ', e);
         if (!lyraGateState.typed.length && triggerLyraOverload('space')) return true;
         const isPerfectWord = lyraWordsMatch(lyraGateState.typed, currentWord);
         if (isPerfectWord) {
@@ -14886,7 +15179,7 @@ function handleLyraGateKeydown(e) {
             lyraGateState.totalCompleted += 1;
             const api = getMiningApi();
             if (api && lyraMiningState) {
-                if (typeof api.setCurrentStoryProgress === 'function') {
+                if (typeof api.setCurrentStoryProgress === 'function' && getLyraCurrentStoryWords().length > 0) {
                     const storyAdvance = api.setCurrentStoryProgress(
                         lyraMiningState,
                         Math.max(0, Number(lyraMiningState.currentStoryProgress) || 0) + 1,
@@ -14935,11 +15228,12 @@ function handleLyraGateKeydown(e) {
             return true;
         }
         lyraGateState.typed = '';
+        lyraGateState.comboStreak = 0;
         showUiMessage('Complete the word to advance the story.', 'info', 1000, 'top-right');
         renderLyraWordStream();
         return true;
     }
-    if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return false;
+    if (!isPrintableKeyEvent(e) || e.repeat) return false;
     playKeypressSound(e.key, e);
     e.preventDefault();
     // Start timer on first character
@@ -14950,9 +15244,9 @@ function handleLyraGateKeydown(e) {
     }
     const nextIndex = lyraGateState.typed.length;
     const expected = currentWord[nextIndex] || '';
-    lyraGateState.typed += e.key;
+    lyraGateState.typed += lyraKey;
     lyraGateState.totalChars++;
-    if (expected && lyraCharsMatch(e.key, expected)) {
+    if (expected && lyraCharsMatch(lyraKey, expected)) {
         lyraGateState.correctChars++;
         lyraGateState.comboStreak += 1;
         lyraGateState.bestCombo = Math.max(lyraGateState.bestCombo, lyraGateState.comboStreak);
@@ -15010,7 +15304,21 @@ function openLyraGate() {
         stopLyraDamagePopupLoop();
         stopLyraDroneOrbitLoop();
         resetLyraGateState();
-        const setupPromise = setupLyraMiningMode();
+        invalidateLyraSceneAnchors();
+        lyraPanelHtmlCache = {};
+        const popupCanvasEl = document.getElementById('lyra-popup-canvas');
+        if (popupCanvasEl) delete popupCanvasEl.dataset.lyraSized;
+        if (lyraCommunityFlushInterval) clearInterval(lyraCommunityFlushInterval);
+        lyraCommunityFlushInterval = setInterval(flushLyraCommunityDamage, LYRA_COMMUNITY_FLUSH_MS);
+        runLyraSetup(() => {
+            resetLyraSceneForNextAsteroid();
+            renderLyraWordStream();
+            setTimeout(() => {
+                updateLyraShipAim();
+                resizeLyraPopupCanvas();
+                focusLyraInput();
+            }, 0);
+        });
         if (ship) {
             ship.innerHTML = getCommunityShipSprite('player');
             const muzzle = document.createElement('span');
@@ -15020,15 +15328,6 @@ function openLyraGate() {
         }
         initLyraStars();
         bindLyraSceneParallax();
-        setupPromise.then(() => {
-            resetLyraSceneForNextAsteroid();
-            renderLyraWordStream();
-            setTimeout(() => {
-                updateLyraShipAim();
-                resizeLyraPopupCanvas();
-                focusLyraInput();
-            }, 0);
-        });
     } catch (err) {
         console.error('openLyraGate failed', err);
         // Keep the modal open even if scene init has a transient issue.
@@ -15042,6 +15341,13 @@ function closeLyraGate() {
     if (!modal) return;
     closeModal(modal);
     lyraGateState.cycleBusy = false;
+    lyraSetupGeneration++;
+    lyraSetupInFlight = false;
+    clearLyraPendingTimeouts();
+    if (lyraHudFrame) { cancelAnimationFrame(lyraHudFrame); lyraHudFrame = 0; }
+    if (lyraCommunityFlushInterval) { clearInterval(lyraCommunityFlushInterval); lyraCommunityFlushInterval = null; }
+    flushLyraCommunityDamage();
+    invalidateLyraSceneAnchors();
     closeLyraStoryResetMenu();
     if (lyraOverloadHintInterval) {
         clearInterval(lyraOverloadHintInterval);
@@ -15070,6 +15376,8 @@ function closeLyraGate() {
     if (laserLayer) laserLayer.innerHTML = '';
     const droneLayer = document.getElementById('lyra-drone-layer');
     if (droneLayer) droneLayer.innerHTML = '';
+    const closeChunkLayer = document.getElementById('lyra-chunk-layer');
+    if (closeChunkLayer) closeChunkLayer.innerHTML = '';
 }
 
 document.addEventListener('click', (event) => {
@@ -15094,6 +15402,20 @@ function handleSectorSystemSelect(node) {
         setTimeout(() => {
             openLyraGate();
         }, 60);
+        return;
+    }
+    if (node.id === 'orion' && window.OrionMode) {
+        closeSectorMap();
+        setTimeout(() => OrionMode.open({
+            wordPool: WORD_LIST,
+            onExit: () => { openSectorMap(); },
+            onRunComplete: (r) => {
+                // Scaled to sit alongside challenge rewards (50-300 XP)
+                const xp = Math.min(300, Math.max(5, Math.round(r.score / 10 + r.wave * 15 + r.wordsDestroyed)));
+                const xpResult = addXP(xp);
+                showUiMessage(`Orion Bulwark: +${xp} XP${xpResult && xpResult.levelUp ? ` \u2022 Level ${xpResult.level}!` : ''}`, 'success', 2600, 'top-right');
+            },
+        }), 60);
         return;
     }
     showUiMessage(`${node.name} travel missions are not online yet.`, 'warn', 2000, 'top-right');
@@ -15629,15 +15951,15 @@ async function openCommunityHub() {
     if (!modal) return;
     openModal(modal);
     renderCommunityHub();
-    const reqId = ++leaderboardReqId;
+    const reqId = ++communityHubReqId;
     const localRows = getCommunityContributionRows();
     try {
         const cloudOut = await apiFetchCloudFirst('/api/leaderboard?community=1&limit=1000');
-        if (reqId !== leaderboardReqId) return;
+        if (reqId !== communityHubReqId) return;
         const serverRows = Array.isArray(cloudOut && cloudOut.contributions) ? cloudOut.contributions : [];
         _communityRowsCache = mergeCommunityContributionRows(serverRows, localRows);
     } catch (e) {
-        if (reqId !== leaderboardReqId) return;
+        if (reqId !== communityHubReqId) return;
         _communityRowsCache = localRows;
     }
     renderCommunityHub();
@@ -15978,7 +16300,7 @@ function renderAdminUsersList() {
         const activeClass = (adminSelectedUserId && adminSelectedUserId === u.id) ? ' active' : '';
         const statusClass = u.isActive ? 'active' : 'offline';
         const statusText = u.isActive ? 'Active' : 'Offline';
-        return `<button type="button" class="admin-user-row${activeClass}" onclick="selectAdminUser('${escapeHtml(u.id)}')">
+        return `<button type="button" class="admin-user-row${activeClass}" data-user-id="${escapeHtml(u.id)}">
             <div class="admin-user-main">
                 <span>${escapeHtml(u.username || 'Unknown')}</span>
                 <span class="admin-user-status ${statusClass}">${statusText}</span>
@@ -15986,6 +16308,9 @@ function renderAdminUsersList() {
             <div class="admin-user-meta">Last login: ${escapeHtml(formatAdminTime(u.lastLoginAt))}</div>
         </button>`;
     }).join('');
+    el.querySelectorAll('.admin-user-row').forEach((btn) => {
+        btn.addEventListener('click', () => selectAdminUser(btn.dataset.userId));
+    });
 }
 
 function renderAdminUserDetail(user) {
@@ -16286,8 +16611,10 @@ function openDeleteAccountConfirm() {
     if (!modal || !input || !desc) return;
     openModal(modal);
     input.value = '';
+    const pwInput = document.getElementById('delete-account-password-confirm');
+    if (pwInput) pwInput.value = '';
     setDeleteAccountNote('');
-    desc.textContent = `Type "${currentUser.username}" to confirm account deletion. This cannot be undone.`;
+    desc.textContent = `Type "${currentUser.username}" and your password to confirm account deletion. This cannot be undone.`;
     input.focus();
 }
 
@@ -16361,10 +16688,15 @@ async function deleteAccountConfirmed() {
         setDeleteAccountNote('Username does not match.', true);
         return;
     }
+    const currentPassword = document.getElementById('delete-account-password-confirm')?.value || '';
+    if (!currentPassword) {
+        setDeleteAccountNote('Enter your current password.', true);
+        return;
+    }
     try {
         await apiFetch('/api/account', {
             method: 'DELETE',
-            body: JSON.stringify({ usernameConfirm: typed }),
+            body: JSON.stringify({ usernameConfirm: typed, currentPassword }),
         });
         if (getProgressOwner() === String(currentUser.id || '')) {
             clearSyncedLocalProgress();
@@ -16495,8 +16827,8 @@ function renderProfile(scores) {
                 return `<div class="profile-best-card">
                     <div class="profile-best-mode">${modeLabels[m]}</div>
                     ${b
-                        ? `<div class="profile-best-wpm">${b.wpm} WPM</div>
-                           <div class="profile-best-acc">${b.accuracy}% acc${errStr}</div>`
+                        ? `<div class="profile-best-wpm">${Number(b.wpm) || 0} WPM</div>
+                           <div class="profile-best-acc">${Number(b.accuracy) || 0}% acc${errStr}</div>`
                         : `<div class="profile-best-empty">—</div>`}
                 </div>`;
             }).join('')}
@@ -17048,6 +17380,18 @@ function showResults(capturedElapsed) {
     document.getElementById('final-peak-wpm').textContent = peakWpm;
     document.getElementById('final-avg-wpm').textContent = avgWpm;
     document.getElementById('final-error-rate').textContent = errorRate + '%';
+    if (window.AdaptivePractice) AdaptivePractice.commitRun();
+    if (window.RunAnalysis) {
+        try {
+            RunAnalysis.render(document.getElementById('run-analysis-container'), {
+                quote: currentQuote,
+                typedChars: typedChars.slice(0, currentIndex),
+                timeline: completedTimeline,
+                wpmSamples,
+                keyHeatmap: window.AdaptivePractice ? AdaptivePractice.getKeyHeatmap() : undefined,
+            });
+        } catch (err) { console.warn('Run analysis failed', err); }
+    }
 
     const rank = getPopulationRank(wpm);
     document.getElementById('rank-label').textContent   = `Faster than ~${rank.percentile}% of the population`;
@@ -17298,7 +17642,8 @@ function showResults(capturedElapsed) {
             }
         }
     }
-    if (isModePB && currentUser) {
+    // Adaptive drills are personalized practice, so they stay off the public leaderboard.
+    if (isModePB && currentUser && currentMode !== 'adaptive') {
         saveScoreToCloud(scoreEntry).then(result => {
             if (!result.ok && !/best run/i.test(String(result.error || ''))) {
                 setAuthNote(`Cloud save failed: ${result.error || 'please try again.'}`, true);
@@ -17310,15 +17655,147 @@ function showResults(capturedElapsed) {
 }
 
 // ── Input handling ─────────────────────────────────────────────────────────
+// Finish a timed test once the limit is reached. Returns true if the limit was hit.
+function finishTimedOverrun() {
+    if (!(startTime && isTimedMode() && getElapsed() >= RANDOM_WORDS_DURATION)) return false;
+    if (!isComplete) {
+        isComplete = true;
+        resultsPendingOpen = true;
+        clearInterval(timerHandle);
+        timerHandle = null;
+        timerEl.textContent = '0s';
+        showResults();
+    }
+    return true;
+}
+
+function handleTypingBackspace(wordMode, e) {
+    if (activeChallengeId === 'nobackspace') return;
+    playKeypressSound('Backspace', e);
+    if (currentIndex > 0) {
+        if (wordMode) {
+            // Delete entire previous word: skip back through spaces, then through non-spaces
+            let target = currentIndex - 1;
+            while (target > 0 && currentQuote[target] === ' ') target--;
+            while (target > 0 && currentQuote[target - 1] !== ' ') target--;
+            const count = currentIndex - target;
+            for (let i = 0; i < count; i++) { typedChars.pop(); }
+            backspaces += count;
+            currentIndex = target;
+            renderQuote();
+        } else {
+            const prevIdx = currentIndex;
+            backspaces++;
+            currentIndex--;
+            typedChars.pop();
+            if (charSpans.length === currentQuote.length) {
+                updateCharSpan(prevIdx);      // old cursor -> untyped
+                updateCharSpan(currentIndex);  // new cursor position
+            } else {
+                renderQuote();
+            }
+        }
+        recordAttemptTimelinePoint();
+        syncTypingViewportScroll();
+        updateStats();
+    }
+}
+
+// Shared per-character logic for keydown and the hidden input path
+let adaptiveLastKeyAt = 0;
+if (window.RunAnalysis) RunAnalysis.ghostDelta.mount(document.getElementById('ghost-delta-slot'));
+
+function updateGhostDelta(elapsedMs) {
+    if (!window.RunAnalysis || !ghostCursorEnabled || !ghostTimeline.length || !startTime) return;
+    RunAnalysis.ghostDelta.update({
+        currentIndex,
+        elapsedMs: elapsedMs != null ? elapsedMs : Date.now() - startTime,
+        ghostTimeline,
+    });
+}
+
+function processTypedChar(rawCh, e) {
+    if (isComplete) return;
+    const ch = normalizeTypedChar(rawCh);
+    if (ch === ' ' && !startTime) return; // idle: let document handler call newTest()
+    const expected = currentQuote[currentIndex];
+    const matches = typedCharMatches(ch, expected);
+    // Store the target char when equivalent so every downstream comparison stays strict
+    const stored = matches ? expected : ch;
+
+    // Perfectionist: any wrong key = instant fail
+    if (activeChallengeId === 'perfectionist' && !matches) {
+        showChallengeFail();
+        return;
+    }
+
+    playKeypressSound(ch, e);
+
+    if (!startTime) startTimer();
+
+    if (isTimedMode()) extendWordBuffer();
+
+    const apNow = performance.now();
+    if (window.AdaptivePractice && /[a-z]/i.test(expected || '')) {
+        AdaptivePractice.recordKeystroke({
+            expected,
+            typed: ch,
+            prevChar: currentQuote[currentIndex - 1] || '',
+            msSincePrev: adaptiveLastKeyAt ? apNow - adaptiveLastKeyAt : null,
+        });
+    }
+    adaptiveLastKeyAt = apNow;
+
+    keyStrokes++;
+    if (!matches) mistakeCount++;
+    const prevIdx = currentIndex;
+    typedChars[currentIndex] = stored;
+    currentIndex++;
+    recordAttemptTimelinePoint();
+    updateGhostDelta();
+
+    if (charSpans.length === currentQuote.length) {
+        updateCharSpan(prevIdx);    // just typed → correct/incorrect
+        updateCharSpan(currentIndex); // new cursor position
+    } else {
+        renderQuote(); // fallback for post-extension rebuilds
+    }
+    maybeTriggerMiningShatter(prevIdx);
+    if (ch !== ' ' && typedChars[prevIdx] === currentQuote[prevIdx]) emitMiningLaserShotAtWord(prevIdx);
+    syncTypingViewportScroll();
+    emitNebulaTrailAtCursor();
+    emitXzLaserAtCursor(ch);
+    updateStats();
+
+    if (!isTimedMode() && currentIndex === currentQuote.length) {
+        isComplete = true;
+        resultsPendingOpen = true;
+        const _capturedElapsed = getElapsed();
+        setTimeout(() => { if (resultsPendingOpen) showResults(_capturedElapsed); }, 400);
+    }
+}
+
 function handleTypingKeydown(e) {
     if (isSplashScreenOpen()) {
         e.preventDefault();
         return;
     }
+    // IME / dead key / Android soft keyboard: the text arrives via input or compositionend
+    if (isImeKeydown(e)) return;
+    if (isPrintableKeyEvent(e)) {
+        // The matching input event (if any) must not be processed a second time
+        keydownHandledInput = true;
+        setTimeout(() => { keydownHandledInput = false; }, 0);
+    }
     if (isLyraGateOpen()) {
         if (handleLyraGateKeydown(e)) return;
     }
     if (isComplete) return;
+
+    if (finishTimedOverrun()) {
+        e.preventDefault();
+        return;
+    }
 
     if (e.key === 'Tab') {
         playKeypressSound('Tab', e);
@@ -17329,83 +17806,18 @@ function handleTypingKeydown(e) {
     }
 
     if (e.key === 'Backspace') {
-        if (activeChallengeId === 'nobackspace') { e.preventDefault(); return; }
-        playKeypressSound('Backspace', e);
         e.preventDefault();
-        if (currentIndex > 0) {
-            if (e.ctrlKey || e.metaKey) {
-                // Delete entire previous word: skip back through spaces, then through non-spaces
-                let target = currentIndex - 1;
-                while (target > 0 && currentQuote[target] === ' ') target--;
-                while (target > 0 && currentQuote[target - 1] !== ' ') target--;
-                const count = currentIndex - target;
-                for (let i = 0; i < count; i++) { typedChars.pop(); }
-                backspaces += count;
-                currentIndex = target;
-                renderQuote();
-            } else {
-                const prevIdx = currentIndex;
-                backspaces++;
-                currentIndex--;
-                typedChars.pop();
-                if (charSpans.length === currentQuote.length) {
-                    updateCharSpan(prevIdx);      // old cursor -> untyped
-                    updateCharSpan(currentIndex);  // new cursor position
-                } else {
-                    renderQuote();
-                }
-            }
-            recordAttemptTimelinePoint();
-            syncTypingViewportScroll();
-            updateStats();
-        }
+        handleTypingBackspace(e.ctrlKey || e.metaKey, e);
         return;
     }
 
-    if (e.key.length !== 1 || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!isPrintableKeyEvent(e)) return;
     if (e.repeat) return; // ignore key-held repeats — each character must be a deliberate press
     if (e.key === ' ' && !startTime) { e.preventDefault(); return; } // idle: let document handler call newTest()
 
-    // Perfectionist: any wrong key = instant fail
-    if (activeChallengeId === 'perfectionist' && e.key !== currentQuote[currentIndex]) {
-        e.preventDefault();
-        showChallengeFail();
-        return;
-    }
-
-    playKeypressSound(e.key, e);
-
-    if (!startTime) startTimer();
-
-    if (isTimedMode()) extendWordBuffer();
-
-    keyStrokes++;
-    if (e.key !== currentQuote[currentIndex]) mistakeCount++;
-    const prevIdx = currentIndex;
-    typedChars[currentIndex] = e.key;
-    currentIndex++;
-    recordAttemptTimelinePoint();
-
-    if (charSpans.length === currentQuote.length) {
-        updateCharSpan(prevIdx);    // just typed → correct/incorrect
-        updateCharSpan(currentIndex); // new cursor position
-    } else {
-        renderQuote(); // fallback for post-extension rebuilds
-    }
-    maybeTriggerMiningShatter(prevIdx);
-    if (e.key !== ' ' && typedChars[prevIdx] === currentQuote[prevIdx]) emitMiningLaserShotAtWord(prevIdx);
-    syncTypingViewportScroll();
-    emitNebulaTrailAtCursor();
-    emitXzLaserAtCursor(e.key);
-    updateStats();
-    setTimeout(() => { hiddenInput.value = ''; }, 0);
-
-    if (!isTimedMode() && currentIndex === currentQuote.length) {
-        isComplete = true;
-        resultsPendingOpen = true;
-        const _capturedElapsed = getElapsed();
-        setTimeout(() => { if (resultsPendingOpen) showResults(_capturedElapsed); }, 400);
-    }
+    e.preventDefault();
+    processTypedChar(e.key, e);
+    setTimeout(() => { resetHiddenInput(); }, 0);
 }
 
 function isTypingIntentKey(e) {
@@ -17436,6 +17848,7 @@ hiddenInput.addEventListener('blur',  () => {
     if (lyraQuoteDisplay) lyraQuoteDisplay.classList.remove('focused');
 });
 hiddenInput.addEventListener('focus', () => {
+    if (!hiddenInput.value) resetHiddenInput();
     if (isLyraGateOpen()) {
         quoteDisplay.classList.remove('focused');
         if (lyraQuoteDisplay) lyraQuoteDisplay.classList.add('focused');
@@ -17479,77 +17892,77 @@ document.getElementById('lyra-gate-modal')?.addEventListener('pointerdown', () =
         window.visualViewport.addEventListener('resize', checkVK);
         window.visualViewport.addEventListener('scroll', checkVK);
     }
-
-    // Handle mobile input via 'input' event for soft keyboards that don't fire keydown.
-    // Track whether keydown already processed this input to avoid double-counting
-    // on tablets with external keyboards.
-    let keydownHandledInput = false;
-    const origHandler = handleTypingKeydown;
-    handleTypingKeydown = function(e) {
-        if (e.key && e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
-            keydownHandledInput = true;
-            setTimeout(() => { keydownHandledInput = false; }, 0);
-        }
-        return origHandler.call(this, e);
-    };
-    // Re-bind the patched handler
-    hiddenInput.removeEventListener('keydown', origHandler);
-    hiddenInput.addEventListener('keydown', handleTypingKeydown);
-
-    hiddenInput.addEventListener('input', (e) => {
-        if (keydownHandledInput) { hiddenInput.value = ''; return; }
-        if (isComplete || isSplashScreenOpen()) return;
-        const val = hiddenInput.value;
-        if (!val) return;
-        // Process each character in the input value
-        for (const ch of val) {
-            if (ch.length !== 1) continue;
-            if (isLyraGateOpen()) {
-                // Simulate a minimal keydown-like event for Lyra gate
-                const fakeEvent = { key: ch, preventDefault() {}, stopPropagation() {}, ctrlKey: false, metaKey: false, altKey: false, repeat: false };
-                handleLyraGateKeydown(fakeEvent);
-                continue;
-            }
-            if (ch === ' ' && !startTime) continue; // idle: skip space
-            if (activeChallengeId === 'perfectionist' && ch !== currentQuote[currentIndex]) {
-                showChallengeFail();
-                hiddenInput.value = '';
-                return;
-            }
-            playKeypressSound(ch, null);
-            if (!startTime) startTimer();
-            if (isTimedMode()) extendWordBuffer();
-            keyStrokes++;
-            if (ch !== currentQuote[currentIndex]) mistakeCount++;
-            const prevIdx = currentIndex;
-            typedChars[currentIndex] = ch;
-            currentIndex++;
-            recordAttemptTimelinePoint();
-            if (charSpans.length === currentQuote.length) {
-                updateCharSpan(prevIdx);
-                updateCharSpan(currentIndex);
-            } else {
-                renderQuote();
-            }
-            maybeTriggerMiningShatter(prevIdx);
-            if (ch !== ' ' && typedChars[prevIdx] === currentQuote[prevIdx]) emitMiningLaserShotAtWord(prevIdx);
-            syncTypingViewportScroll();
-            emitNebulaTrailAtCursor();
-            updateStats();
-            if (!isTimedMode() && currentIndex === currentQuote.length) {
-                isComplete = true;
-                resultsPendingOpen = true;
-                const _capturedElapsed = getElapsed();
-                setTimeout(() => showResults(_capturedElapsed), 400);
-                break;
-            }
-        }
-        hiddenInput.value = '';
-    });
 })();
+
+// ── Hidden input path (all devices): soft keyboards, IME, dead keys ────────
+// Characters that keydown did not handle (IME, dead keys, Android) arrive via
+// 'input' / 'compositionend' and are fed through the same per-character logic.
+function makeSyntheticKeyEvent(key) {
+    return { key, preventDefault() {}, stopPropagation() {}, ctrlKey: false, metaKey: false, altKey: false, repeat: false };
+}
+
+function processInputBackspace() {
+    if (isSplashScreenOpen()) return;
+    if (isLyraGateOpen()) { handleLyraGateKeydown(makeSyntheticKeyEvent('Backspace')); return; }
+    if (isComplete) return;
+    handleTypingBackspace(false, null);
+}
+
+function processInputText(text) {
+    if (isSplashScreenOpen()) return;
+    const lyraOpen = isLyraGateOpen();
+    if (!lyraOpen && isComplete) return;
+    // Limit a single event (swipe, autocorrect) to the rest of the current word plus 1
+    let remaining;
+    if (lyraOpen) {
+        remaining = (lyraGateState.words[0] || '').length - lyraGateState.typed.length;
+    } else {
+        const nextSpace = currentQuote.indexOf(' ', currentIndex);
+        remaining = (nextSpace < 0 ? currentQuote.length : nextSpace) - currentIndex;
+    }
+    const cap = Math.max(remaining, 0) + 1;
+    const chars = Array.from(String(text || '').split(HIDDEN_INPUT_SENTINEL).join(''))
+        .filter(ch => ch.charCodeAt(0) >= 32)
+        .slice(0, cap);
+    for (const ch of chars) {
+        if (lyraOpen) {
+            handleLyraGateKeydown(makeSyntheticKeyEvent(ch));
+            continue;
+        }
+        if (finishTimedOverrun()) break;
+        processTypedChar(ch, null);
+        if (isComplete) break;
+    }
+}
+
+let lastInputCommit = { text: '', time: 0 };
+function commitInputText(text) {
+    const now = performance.now();
+    // compositionend and a trailing input event can both report the same text
+    if (text && text === lastInputCommit.text && now - lastInputCommit.time < 50) return;
+    lastInputCommit = { text, time: now };
+    processInputText(text);
+}
+
+hiddenInput.addEventListener('input', (e) => {
+    if (e.isComposing) return; // wait for compositionend
+    if (e.inputType && e.inputType.indexOf('delete') === 0) {
+        // Gboard often sends keyCode 229 / 'Unidentified' for Backspace
+        if (e.inputType === 'deleteContentBackward') processInputBackspace();
+        resetHiddenInput();
+        return;
+    }
+    if (!keydownHandledInput) commitInputText(hiddenInput.value);
+    resetHiddenInput();
+});
+hiddenInput.addEventListener('compositionend', (e) => {
+    if (e.data) commitInputText(e.data);
+    resetHiddenInput();
+});
 
 document.addEventListener('keydown', handleModalFocusTrap);
 document.addEventListener('keydown', (e) => {
+    if (window.OrionMode && OrionMode.isOpen()) return; // Orion Bulwark owns the keyboard
     const resultsOpen = resultOverlay.classList.contains('show');
     const activeEl = document.activeElement;
     if (isSplashScreenOpen()) {
@@ -18992,13 +19405,14 @@ async function refreshWeeklyRivalTarget() {
 
 const STREAK_KEY = 'sampire-streak';
 const BADGES_KEY = 'sampire-badges';
-const BETA_FOUNDER_ACHIEVEMENT_ENABLED = true;
+// Founder is closed to new signups: only accounts created before this cutoff qualify.
+const FOUNDER_SIGNUP_CUTOFF_MS = Date.UTC(2026, 10, 7); // 2026-11-07T00:00:00Z
 
 const BADGE_DEFS = [
     { id: 'sonic_boom',    name: 'Sonic Boom',       desc: 'Hit 100+ WPM for the first time',           icon: '⚡' },
     { id: 'speed_demon',   name: 'Speed Demon',      desc: 'Achieve 120+ WPM',                          icon: '🔥' },
     { id: 'flawless',      name: 'Flawless',         desc: 'Complete The Perfectionist challenge',       icon: '✨' },
-    { id: 'midnight_oil',  name: 'The Midnight Oil', desc: 'Complete a challenge between 2–3 AM',        icon: '🌙' },
+    { id: 'midnight_oil',  name: 'The Midnight Oil', desc: 'Complete a run between midnight and 4 AM',   icon: '🌙' },
     { id: 'streak_master', name: 'Streak Master',    desc: 'Maintain a 7-day streak',                   icon: '🔗' },
     { id: 'triple_crown',  name: 'Triple Crown',     desc: 'Complete all 3 daily challenges in one day', icon: '👑' },
     { id: 'founder',       name: 'Founder',          desc: 'Created an account during the beta period',  icon: '🏛️' },
@@ -19051,9 +19465,23 @@ function awardBadge(id) {
 }
 
 function ensureFounderBadgeForBeta() {
-    if (!BETA_FOUNDER_ACHIEVEMENT_ENABLED) return;
     if (!currentUser) return;
-    awardBadge('founder');
+    // The server sends createdAt: null for legacy accounts that predate the field; those are old enough to qualify.
+    const createdAt = Number(currentUser.createdAt) || 0;
+    const isLegacyCloudAccount = currentUser.createdAt === null;
+    if (isLegacyCloudAccount || (createdAt > 0 && createdAt < FOUNDER_SIGNUP_CUTOFF_MS)) awardBadge('founder');
+    awardRetroactiveBadges();
+}
+
+// One-time check after hydration: grant badges whose conditions are already met, with a single summary toast.
+function awardRetroactiveBadges() {
+    if (!currentUser) return;
+    const granted = [];
+    if ((getStreakData().streak || 0) >= 7 && awardBadge('streak_master')) granted.push('streak_master');
+    if (getDailyCompletions().length >= CHALLENGES.length && awardBadge('triple_crown')) granted.push('triple_crown');
+    if (!granted.length) return;
+    const names = granted.map(id => (BADGE_DEFS.find(b => b.id === id) || { name: id }).name).join(', ');
+    showUiMessage(`Achievement${granted.length > 1 ? 's' : ''} unlocked: ${names}`, 'success', 3600);
 }
 
 function getBibleModeLookupSet() {
@@ -19074,9 +19502,9 @@ function checkBadges(wpm, passed, challengeId) {
     if (wpm >= 100 && awardBadge('sonic_boom'))  newBadges.push('sonic_boom');
     if (wpm >= 120 && awardBadge('speed_demon')) newBadges.push('speed_demon');
     if (passed && challengeId === 'perfectionist' && awardBadge('flawless')) newBadges.push('flawless');
-    if (passed && challengeId) {
+    if (passed) {
         const h = new Date().getHours();
-        if (h >= 2 && h < 3 && awardBadge('midnight_oil')) newBadges.push('midnight_oil');
+        if (h >= 0 && h < 4 && awardBadge('midnight_oil')) newBadges.push('midnight_oil');
     }
     if ((getStreakData().streak || 0) >= 7 && awardBadge('streak_master')) newBadges.push('streak_master');
     if (getDailyCompletions().length >= CHALLENGES.length && awardBadge('triple_crown')) newBadges.push('triple_crown');

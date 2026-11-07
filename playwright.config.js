@@ -2,6 +2,7 @@ const { defineConfig } = require('@playwright/test');
 
 module.exports = defineConfig({
   testDir: './tests',
+  testMatch: '**/*.spec.js', // *.test.js files are plain node unit tests
   timeout: 30000,
   expect: { timeout: 10000 },
   fullyParallel: false,
@@ -12,6 +13,8 @@ module.exports = defineConfig({
     headless: true,
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
+    // Set CHROMIUM_PATH (e.g. /snap/bin/chromium) on platforms Playwright can't download browsers for.
+    launchOptions: process.env.CHROMIUM_PATH ? { executablePath: process.env.CHROMIUM_PATH } : {},
   },
   projects: [
     {

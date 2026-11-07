@@ -18,3 +18,7 @@ data/app-data.json
 node_modules/
 output/
 tmp_web_game_playwright_client.mjs
+
+# Test output
+test-results/
+playwright-report/

@@ -6,12 +6,14 @@ import {
   getSecret,
   publicUser,
   putJson,
+  getJson,
   hasStorage,
   looksLikeEmptyAuthNamespace,
   markStorageReady,
   getClientIp,
   safeRateKeyPart,
   incrementRateLimit,
+  constantTimeEqual,
   mintSessionTokens,
   buildAccessSessionCookie,
   buildRefreshSessionCookie,
@@ -33,14 +35,18 @@ export async function onRequestPost(context) {
       retryAfter: ipRate.retryAfterSec,
     }, 429);
   }
-  const userRate = await incrementRateLimit(env, `rate:login:user:${safeRateKeyPart(usernameNorm, 'unknown')}`, 60 * 10);
-  if (userRate.count > 12) {
+  // Per-username limit is keyed by username + client IP and counts FAILED attempts only,
+  // so a third party cannot lock a victim out from other IPs.
+  const failKey = `rate:login:fail:${safeRateKeyPart(usernameNorm, 'unknown')}:${ip}`;
+  const failState = await getJson(env, failKey, null);
+  if (failState && Number(failState.resetAt) > Date.now() && Number(failState.count) >= 12) {
     return json({
       error: 'Too many login attempts for this account. Please try again later.',
       code: 'RATE_LIMITED',
-      retryAfter: userRate.retryAfterSec,
+      retryAfter: Math.max(1, Math.ceil((Number(failState.resetAt) - Date.now()) / 1000)),
     }, 429);
   }
+  const recordFailure = () => incrementRateLimit(env, failKey, 60 * 10);
 
   const userId = await env.TYPING_APP.get(`userByName:${usernameNorm}`);
   if (!userId) {
@@ -58,15 +64,22 @@ export async function onRequestPost(context) {
         requestId,
       }, 503);
     }
+    await recordFailure();
     return json({ error: 'Invalid username or password' }, 401);
   }
 
   const userRaw = await env.TYPING_APP.get(`user:${userId}`);
-  if (!userRaw) return json({ error: 'Invalid username or password' }, 401);
+  if (!userRaw) {
+    await recordFailure();
+    return json({ error: 'Invalid username or password' }, 401);
+  }
   const user = JSON.parse(userRaw);
 
   const { hash } = await hashPassword(password, user.passwordSalt);
-  if (hash !== user.passwordHash) return json({ error: 'Invalid username or password' }, 401);
+  if (!constantTimeEqual(hash, user.passwordHash)) {
+    await recordFailure();
+    return json({ error: 'Invalid username or password' }, 401);
+  }
 
   const now = Date.now();
   user.lastLoginAt = now;

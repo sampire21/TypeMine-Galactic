@@ -28,18 +28,29 @@ export async function onRequestPost(context) {
     time: Number(body.time) || 0,
     typedWords: Math.max(0, Math.floor(Number(body.typedWords) || 0)),
     mode: normalizeMode(body.mode),
-    date: Number(body.date) || Date.now(),
+    date: Date.now(), // server time; client-supplied date is ignored
     createdAt: Date.now(),
   };
 
   if (
-    score.wpm < 0 || score.wpm > 500 ||
-    score.rawWpm < 0 || score.rawWpm > 600 ||
+    !Number.isFinite(score.wpm) || !Number.isFinite(score.rawWpm) ||
+    !Number.isFinite(score.accuracy) || !Number.isFinite(score.consistency) || !Number.isFinite(score.time) ||
+    score.wpm < 0 || score.wpm > 300 ||
+    score.rawWpm < 0 || score.rawWpm > 400 ||
     score.accuracy < 0 || score.accuracy > 100 ||
     score.consistency < 0 || score.consistency > 100 ||
-    score.time < 0 || score.time > 3600
+    score.time < 1 || score.time > 3600 ||
+    score.typedWords > 20000
   ) {
     return json({ error: 'Invalid score payload' }, 400);
+  }
+  // Cross-check wpm against typed word count: wpm is chars/5 per minute, so with words of
+  // up to ~12 chars it cannot exceed typedWords per minute * 2.5 (plus slack for short runs).
+  if (score.typedWords > 0) {
+    const wordsPerMin = score.typedWords / (score.time / 60);
+    if (score.wpm > wordsPerMin * 2.5 + 10) return json({ error: 'Implausible score' }, 400);
+    // Cannot type more than ~25 words/sec worth of text (300 wpm of 5-char words is 5/s).
+    if (wordsPerMin > 900) return json({ error: 'Implausible score' }, 400);
   }
 
   const isBetterScore = (candidate, baseline) => {

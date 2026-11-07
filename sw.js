@@ -1,5 +1,6 @@
-const APP_CACHE = 'sampire-app-v1';
-const RUNTIME_CACHE = 'sampire-runtime-v1';
+const CACHE_VERSION = 'v2';
+const APP_CACHE = `sampire-app-${CACHE_VERSION}`;
+const RUNTIME_CACHE = `sampire-runtime-${CACHE_VERSION}`;
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest', '/Favicon.png', '/icons/icon-192.png', '/icons/icon-512.png'];
 
 self.addEventListener('install', (event) => {
@@ -18,7 +19,7 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-async function networkFirst(request) {
+async function networkFirst(request, isNavigation) {
   const runtime = await caches.open(RUNTIME_CACHE);
   try {
     const response = await fetch(request);
@@ -27,8 +28,11 @@ async function networkFirst(request) {
   } catch (error) {
     const cached = await runtime.match(request);
     if (cached) return cached;
-    const fallback = await caches.match('/index.html');
-    if (fallback) return fallback;
+    // Only navigations may fall back to the app shell; never scripts, images or audio.
+    if (isNavigation) {
+      const fallback = await caches.match('/index.html');
+      if (fallback) return fallback;
+    }
     throw error;
   }
 }
@@ -45,5 +49,6 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  event.respondWith(networkFirst(request));
+  const isNavigation = request.mode === 'navigate' || request.destination === 'document';
+  event.respondWith(networkFirst(request, isNavigation));
 });

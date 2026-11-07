@@ -12,3 +12,11 @@ package.json
 package-lock.json
 .gitignore
 .assetsignore
+.claude
+.wranglerignore
+tests
+test-results
+docker
+Dockerfile
+playwright.config.js
+progress.md

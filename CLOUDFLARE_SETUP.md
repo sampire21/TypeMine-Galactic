@@ -51,7 +51,7 @@ This secret signs authentication tokens. **It must be set or all logins will fai
 To use the admin panel, add one of these variables in the same dashboard section:
 
 - `ADMIN_USER_ID` — the UUID of your admin account (most secure)
-- `ADMIN_USERNAME` — your username (falls back to `sampire` if neither is set)
+- `ADMIN_USERNAME` — your username (if neither is set, no account has admin access)
 
 ---
 

@@ -229,6 +229,7 @@ export async function onRequestPatch(context) {
     const { salt, hash } = await hashPassword(resetPassword);
     nextUser.passwordSalt = salt;
     nextUser.passwordHash = hash;
+    nextUser.sessionsValidAfter = Date.now(); // revokes all of the user's existing sessions
   }
 
   if (usernameChanged) {

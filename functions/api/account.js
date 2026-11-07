@@ -11,6 +11,11 @@ import {
   leaderboardKey,
   publicUser,
   hasStorage,
+  constantTimeEqual,
+  getSecret,
+  mintSessionTokens,
+  buildAccessSessionCookie,
+  buildRefreshSessionCookie,
 } from './_lib.js';
 
 export async function onRequestPatch(context) {
@@ -29,6 +34,7 @@ export async function onRequestPatch(context) {
   }
 
   const updated = { ...user };
+  let passwordChanged = false;
 
   if (nextUsernameRaw) {
     const usernameCheck = validateUsername(nextUsernameRaw);
@@ -47,10 +53,12 @@ export async function onRequestPatch(context) {
   if (newPassword) {
     if (newPassword.length < 6) return json({ error: 'Password must be at least 6 characters' }, 400);
     const { hash: currentHash } = await hashPassword(currentPassword, user.passwordSalt);
-    if (currentHash !== user.passwordHash) return json({ error: 'Current password is incorrect' }, 401);
+    if (!constantTimeEqual(currentHash, user.passwordHash)) return json({ error: 'Current password is incorrect' }, 401);
     const { salt, hash } = await hashPassword(newPassword);
     updated.passwordSalt = salt;
     updated.passwordHash = hash;
+    updated.sessionsValidAfter = Date.now(); // revokes all existing sessions
+    passwordChanged = true;
   }
 
   if (updated.username !== user.username) {
@@ -66,6 +74,14 @@ export async function onRequestPatch(context) {
   }
 
   await env.TYPING_APP.put(`user:${user.id}`, JSON.stringify(updated));
+  if (passwordChanged) {
+    // Issue a fresh session for the current device; all others were just revoked.
+    const tokenSet = await mintSessionTokens(env, updated.id, getSecret(env));
+    const headers = new Headers();
+    headers.append('set-cookie', buildAccessSessionCookie(request, tokenSet.accessToken));
+    headers.append('set-cookie', buildRefreshSessionCookie(request, tokenSet.refreshToken));
+    return json({ ok: true, user: publicUser(updated) }, 200, headers);
+  }
   return json({ ok: true, user: publicUser(updated) }, 200);
 }
 
@@ -80,6 +96,9 @@ export async function onRequestDelete(context) {
   if (usernameConfirm !== user.username) {
     return json({ error: 'Username confirmation does not match' }, 400);
   }
+  const currentPassword = body.currentPassword != null ? String(body.currentPassword) : '';
+  const { hash: currentHash } = await hashPassword(currentPassword, user.passwordSalt);
+  if (!constantTimeEqual(currentHash, user.passwordHash)) return json({ error: 'Current password is incorrect' }, 401);
 
   await env.TYPING_APP.delete(`userByName:${user.usernameNorm}`);
   await env.TYPING_APP.delete(`user:${user.id}`);

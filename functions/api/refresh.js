@@ -53,6 +53,10 @@ export async function onRequestPost(context) {
 
   const user = await getJson(env, `user:${payload.uid}`, null);
   if (!user) return unauthorizedWithCookieClear(request);
+  if (Number(user.sessionsValidAfter) > 0 && Number(session.createdAt) < Number(user.sessionsValidAfter)) {
+    await revokeAuthSession(env, payload.sid);
+    return unauthorizedWithCookieClear(request);
+  }
 
   const nextRefreshJti = crypto.randomUUID();
   const nextRefreshExp = Date.now() + REFRESH_SESSION_TTL_MS;
