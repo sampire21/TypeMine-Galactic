@@ -124,8 +124,12 @@ test.describe('Layout', () => {
       const m = await page.evaluate(() => {
         const bar = document.getElementById('top-bar');
         const r = bar.getBoundingClientRect();
-        const tops = [...bar.querySelectorAll('button, .xp-display')].filter((el) => el.offsetParent !== null).map((el) => Math.round(el.getBoundingClientRect().top));
-        return { h: r.height, w: r.width, rows: new Set(tops.map((t) => Math.round(t / 12))).size, scrollW: document.documentElement.scrollWidth, pad: getComputedStyle(document.body).paddingTop };
+        // One row means every control's vertical midpoint sits within 20 px of the first one's
+        // (buttons are 44 px tall and the XP bar 22 px, so comparing tops would miscount).
+        const mids = [...bar.querySelectorAll('button, .xp-display')].filter((el) => el.offsetParent !== null).map((el) => { const b = el.getBoundingClientRect(); return b.top + b.height / 2; });
+        const rowsList = [];
+        for (const mid of mids) { if (!rowsList.some((row) => Math.abs(row - mid) <= 20)) rowsList.push(mid); }
+        return { h: r.height, w: r.width, rows: rowsList.length, scrollW: document.documentElement.scrollWidth, pad: getComputedStyle(document.body).paddingTop };
       });
       expect(m.h).toBeLessThan(64);
       expect(m.rows).toBe(1);

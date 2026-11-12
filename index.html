@@ -25,6 +25,7 @@
     <link rel="stylesheet" href="css/modes.css">
     <link rel="stylesheet" href="css/social.css">
     <link rel="stylesheet" href="css/ui.css">
+    <link rel="stylesheet" href="css/coach.css">
 </head>
 <body>
 <canvas id="space-bg" aria-hidden="true"></canvas>
@@ -103,7 +104,6 @@
                     </div>
                 </div>
             </div>
-            <span id="account-mode-badge" class="account-mode-badge"></span>
             <span class="backend-mode-badge" id="backend-mode-badge" data-mode="unknown" role="status" aria-live="polite" title="Checking whether the online account service is available.">Checking connection</span>
             <button type="button" class="btn btn-primary profile-toggle" id="profile-toggle" onclick="openProfileOrLogin()" title="Profile">
                 <span class="profile-user-icon btn-ico" id="profile-user-icon" aria-hidden="true">👤</span>
@@ -240,7 +240,7 @@
             <h3>Modes</h3>
             <ul>
                 <li><strong>Quotes</strong> and <strong>Random Words</strong> are normal runs.</li>
-                <li><strong>Words 30s</strong> is a timed sprint.</li>
+                <li><strong>Timed</strong> is a sprint against the clock (30 seconds by default).</li>
                 <li><strong>Adaptive</strong> builds short drills from the keys you miss or type slowly.</li>
                 <li><strong>Challenges</strong> are daily and weekly goals that pay out XP.</li>
             </ul>
@@ -722,7 +722,7 @@
     <div class="profile-modal-card" role="dialog" aria-modal="true" aria-labelledby="inventory-modal-title">
         <div class="profile-modal-header">
             <div class="profile-modal-title" id="inventory-modal-title">Owned</div>
-            <button type="button" class="leaderboard-modal-close secondary" onclick="closeInventory()" aria-label="Close inventory">X</button>
+            <button type="button" class="leaderboard-modal-close secondary" onclick="closeInventory()" aria-label="Close owned items">X</button>
         </div>
         <div id="inventory-content"></div>
     </div>
@@ -870,11 +870,13 @@
                 <div id="result-rewards" class="result-rewards"></div>
                 <div id="result-goals" class="result-goals"></div>
                 <div class="result-week-words" id="result-week-words"></div>
+                <div id="challenge-outcome" class="challenge-outcome" hidden></div>
                 <div class="buttons result-actions">
                     <button class="new-test-btn result-cta" id="result-cta-btn" type="button" onclick="runResultCta()">One more run</button>
                     <button class="secondary new-text-btn" type="button" onclick="newTest()">New text<span class="btn-hint">(Spacebar)</span></button>
                     <button class="secondary" type="button" onclick="tryAgain()">Try again<span class="btn-hint">(Tab)</span></button>
                     <button class="secondary share-result-btn" id="share-result-btn" type="button" onclick="shareLastRun()">Share result</button>
+                    <button class="secondary challenge-friend-btn" id="challenge-friend-btn" type="button" onclick="challengeLastRun()" title="Copy a link that gives a friend this exact text">Challenge a friend</button>
                 </div>
                 <div class="rank-block">
                     <div class="rank-label" id="rank-label">—</div>
@@ -946,6 +948,8 @@
     </div>
 </div>
 
+<div class="modal-shell coach-modal" id="coach-modal" aria-hidden="true"><div class="panel coach-card" role="dialog" aria-modal="true" aria-labelledby="coach-modal-title"><div class="modal-header"><h2 class="modal-title" id="coach-modal-title">Coach</h2><button type="button" class="btn btn-icon modal-close" aria-label="Close coach" onclick="Coach.close()">×</button></div><div class="coach-body" id="coach-modal-body"></div></div></div>
+
 <script src="bible-verses.js"></script>
 <script src="js/mining-mode.js"></script>
 <script src="js/adaptive-practice.js"></script>
@@ -965,6 +969,7 @@
 <script src="js/app-audio.js"></script>
 <script src="js/app-progression.js"></script>
 <script src="js/app-boot.js"></script>
+<script src="js/coach.js"></script>
 <script src="js/space-bg.js"></script>
 </body>
 </html>

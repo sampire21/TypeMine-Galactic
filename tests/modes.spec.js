@@ -183,6 +183,7 @@ test.describe('Story mode and modes', () => {
   });
 
   test('Orion Bulwark opens from the map at level 2 and shows the results card', async ({ page }) => {
+    test.slow(); // real Orion run plus results card; needs headroom when the suite runs in parallel
     await start(page, { 'sampire-xp': '500' });
     await page.evaluate(() => openSectorMap());
     await expect(page.locator('#sector-map-nodes g[data-node-id="orion"] .sector-node-status')).toHaveText('Ready to play');

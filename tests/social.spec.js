@@ -3,6 +3,7 @@
 // share card, shared-result banner, phone layout, keyboard tooltip.
 // The shared dev server on port 3000 still runs the old API, so every contract route is mocked.
 const { test: base, expect } = require('@playwright/test');
+const { startTestServer } = require('./_server');
 
 const ALLTIME_ROWS = [
   { userId: 'u-alpha', username: 'alpha', wpm: 120, rawWpm: 125, accuracy: 98, consistency: 80, time: 30, mode: 'quotes', date: 1762900000000, level: 23 },
@@ -57,6 +58,7 @@ async function mockApi(page, { loggedIn = true, state = {} } = {}) {
     const mode = url.searchParams.get('mode') || 'all';
     let rows = tab === 'weekly' ? WEEKLY_ROWS : (tab === 'friends' ? FRIEND_ROWS : ALLTIME_ROWS);
     if (mode !== 'all') rows = rows.filter((row) => row.mode === mode);
+    if (state.titles) rows = rows.map((row) => (state.titles[row.username] ? { ...row, title: state.titles[row.username] } : row));
     const yourRank = tab === 'alltime' && mode === 'all' ? { rank: 3, wpm: 80 } : null;
     return json(r, { rows, weekKey: '2026-11-08', yourRank });
   });
@@ -103,6 +105,81 @@ async function start(page, path = '/') {
 async function openBoard(page) {
   await page.evaluate(() => openLeaderboard());
   await expect(page.locator('#leaderboard-modal')).toBeVisible({ timeout: 3000 });
+}
+
+/** Target text, read from the char spans (same approach as features.spec.js). */
+async function readTarget(page) {
+  return page.evaluate(() => Array.from(document.querySelectorAll('#quote-display span[class*="char-"]'))
+    .map((s) => (s.textContent || '').replace(/\u00a0/g, ' ')).join(''));
+}
+
+/**
+ * Type the whole target correctly. The default 170 ms per key is about 70 WPM: a run typed at machine
+ * speed is marked unranked and earns no speed XP, so tests that need a real, counted run use a human pace.
+ */
+async function completeRun(page, { delay = 170 } = {}) {
+  await page.evaluate(() => { window.lastRunSummary = null; });
+  await page.locator('#quote-display').click();
+  await expect(page.locator('#hidden-input')).toBeFocused({ timeout: 2000 });
+  const text = await readTarget(page);
+  await page.keyboard.type(text, { delay });
+  // The results card opens 400 ms after the last key.
+  await expect(page.locator('#result-overlay')).toHaveClass(/show/, { timeout: 15000 });
+  await expect.poll(() => page.evaluate(() => !!window.lastRunSummary)).toBe(true);
+  return text;
+}
+
+/** Close the level-up card the way a player would; it sits on top of the results card after a level up. */
+async function dismissLevelUp(page) {
+  const overlay = page.locator('#levelup-overlay');
+  if (!(await overlay.evaluate((el) => el.classList.contains('show')))) return;
+  await overlay.getByRole('button', { name: 'Keep going' }).click();
+  await expect(overlay).not.toHaveClass(/show/);
+}
+
+/**
+ * A browser context against a real server (no API mocks), with the same safety net as the fixture.
+ * These tests use a private in-memory copy of the server (tests/_server.js), not the shared one on
+ * :3000, so throwaway accounts and scores never reach the shared server and its rate limits.
+ */
+async function realContext(browser, baseURL, { permissions = [] } = {}) {
+  const context = await browser.newContext({ baseURL, serviceWorkers: 'block', permissions, viewport: { width: 1280, height: 720 } });
+  const page = await context.newPage();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+  await page.route('https://ipapi.co/**', (r) => r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: '{}' }));
+  return { context, page, errors };
+}
+
+/** Open a page on the real server and wait until the boot session check has answered and cloud mode is on. */
+async function startReal(page, path = '/') {
+  const sessionProbe = page.waitForResponse((res) => new URL(res.url()).pathname === '/api/me');
+  await page.goto(path);
+  await sessionProbe;
+  const splash = page.locator('#entry-splash');
+  if (await splash.isVisible().catch(() => false)) {
+    await page.evaluate(() => { if (typeof hideSplashScreen === 'function') hideSplashScreen(); });
+  }
+  await expect(page.locator('#typing-area')).toBeVisible({ timeout: 5000 });
+  await expect.poll(() => page.evaluate(() => typeof isCloudMode === 'function' && isCloudMode())).toBe(true);
+  await expect(page.locator('#quote-display span[class*="char-"]').first()).toBeVisible();
+}
+
+/** Realistic test length: 10 words, so a run typed at a human pace takes about eight seconds. */
+async function useTenWords(page) {
+  await page.evaluate(() => setEngineOption('words', 10));
+  await expect.poll(() => readTarget(page).then((t) => t.split(' ').length)).toBe(10);
+}
+
+const AUDIT_PASSWORD = 'audit-pass-123';
+function auditName(tag) {
+  return `audit_${tag}${Date.now().toString(36).slice(-5)}${Math.floor(Math.random() * 1000).toString(36)}`.slice(0, 24);
+}
+/** Sign up with the app's own function, then wait until the account owns this browser's progress and the save is done. */
+async function signUp(page, username) {
+  await page.evaluate(async ({ username, password }) => { await signupUser(username, password); }, { username, password: AUDIT_PASSWORD });
+  await expect.poll(() => page.evaluate(() => (typeof currentUser !== 'undefined' && currentUser) ? currentUser.username : null), { timeout: 10000 }).toBe(username);
+  await expect.poll(() => page.evaluate(() => getProgressOwner() === String(currentUser.id) && !progressSyncInFlight), { timeout: 15000 }).toBe(true);
 }
 
 test.describe('Social features', () => {
@@ -289,5 +366,208 @@ test.describe('Social features', () => {
     await expect(tooltip.locator('.lb-tooltip-compare')).toBeVisible();
     await page.keyboard.press('Enter');
     await expect(page.locator('#lb-compare-panel')).toBeVisible();
+  });
+
+  test('board shows your equipped name colour and title; other players\' titles come from the row', async ({ page }) => {
+    const state = { titles: { alpha: 'Speedster' } };
+    await mockApi(page, { state });
+    await start(page);
+    // Level 6 (XP 2500) unlocks the Rookie title; the sky blue name colour value is what the shop writes.
+    await page.evaluate(() => {
+      localStorage.setItem('sampire-xp', '2500');
+      localStorage.setItem('sampire-title', JSON.stringify({ title: 'Rookie', nameColor: 'name_sky', caretColor: '', trailColor: '', nameColorValue: '#5ac8fa' }));
+    });
+    await openBoard(page);
+    const self = page.locator('#leaderboard-list .lb-row-self .lb-user');
+    await expect(self).toContainText('tester', { timeout: 5000 });
+    await expect(self.locator('.lb-user-title')).toHaveText('Rookie');
+    await expect(self).toHaveCSS('color', 'rgb(90, 200, 250)');
+    const alpha = page.locator('#leaderboard-list .lb-user[data-username="alpha"]');
+    await expect(alpha.locator('.lb-user-title')).toHaveText('Speedster');
+    await expect(alpha).toHaveAttribute('aria-label', /alpha, Speedster, Level 23, Typist/);
+    // bravo has no title and no colour of its own: tier colour only, no tag
+    await expect(page.locator('#leaderboard-list .lb-user[data-username="bravo"] .lb-user-title')).toHaveCount(0);
+    // A title that is not unlocked is not shown (guards against a hand-edited record).
+    await page.evaluate(() => localStorage.setItem('sampire-title', JSON.stringify({ title: 'Elite', nameColorValue: 'javascript:bad' })));
+    await page.locator('.lb-tab[data-tab="weekly"]').click();
+    await page.locator('.lb-tab[data-tab="alltime"]').click();
+    await expect(page.locator('#leaderboard-list .lb-row-self .lb-user-title')).toHaveCount(0);
+    await expect(page.locator('#leaderboard-list .lb-row-self .lb-user')).not.toHaveAttribute('style', /./);
+  });
+
+  test('challenge link: encode and decode round trip, bad input rejected', async ({ page }) => {
+    await mockApi(page, { loggedIn: false });
+    await start(page);
+    const out = await page.evaluate(() => {
+      const spec = { seed: 123456789, mode: 'words', options: { words: 25, punctuation: true, numbers: false, wordList: 'common', time: 30, caret: 'block', liveChart: true } };
+      const link = ShareCard.buildChallengeLink({ wpm: 84, accuracy: 97, name: 'sam', mode: 'words' }, spec);
+      const param = new URL(link).searchParams.get('c');
+      const decoded = ShareCard.decodeChallengeParam(param);
+      const bad = [
+        ShareCard.decodeChallengeParam('not-base64!!'),
+        ShareCard.decodeChallengeParam(ShareCard.encodeChallengeParam({ seed: 5, mode: 'adaptive', wpm: 50 })),
+        ShareCard.decodeChallengeParam(ShareCard.encodeChallengeParam({ seed: -1, mode: 'words', wpm: 50 })),
+        ShareCard.decodeChallengeParam(ShareCard.encodeChallengeParam({ seed: 5, mode: 'words', wpm: 0 })),
+        ShareCard.decodeChallengeParam(ShareCard.encodeChallengeParam({ seed: 5.5, mode: 'words', wpm: 50 })),
+      ];
+      const noSpec = ShareCard.buildChallengeLink({ wpm: 84 }, { seed: 1, mode: 'story' });
+      const text = ShareCard.buildChallengeText({ wpm: 84, accuracy: 97, name: 'sam', mode: 'words' });
+      return { link, decoded, bad, noSpec, text };
+    });
+    expect(out.link).toContain('?c=');
+    // The parameter is url-safe base64: no "+", "/" or "=" padding (the "//" in "http://" is not part of it).
+    expect(new URL(out.link).searchParams.get('c')).toMatch(/^[A-Za-z0-9_-]+$/);
+    expect(out.decoded).toEqual({ seed: 123456789, mode: 'words', options: { time: 30, words: 25, punctuation: true, numbers: false, wordList: 'common' }, wpm: 84, accuracy: 97, name: 'sam' });
+    expect(out.bad).toEqual([null, null, null, null, null]);
+    expect(out.noSpec).toBe('');
+    expect(out.text).toBe('sam typed 84 WPM at 97% accuracy on this exact text in Random Words. Beat it?');
+    await expect(page.locator('#challenge-friend-btn')).toHaveText('Challenge a friend');
+  });
+
+  test('challenge link end to end on a real server: copy, open fresh, same text, win banner, rematch', async ({ browser }) => {
+    test.setTimeout(120000);
+    const server = await startTestServer();
+    const a = await realContext(browser, server.base, { permissions: ['clipboard-read', 'clipboard-write'] });
+    const b = await realContext(browser, server.base);
+    try {
+      // Player A finishes a 10-word Random Words run at about 70 WPM and copies the challenge link.
+      await startReal(a.page);
+      await expect(a.page.locator('.mode-tab.active')).toHaveAttribute('data-mode', 'words');
+      await useTenWords(a.page);
+      const textA = await completeRun(a.page);
+      const wpmA = await a.page.evaluate(() => Math.round(window.lastRunSummary.wpm));
+      expect(wpmA).toBeGreaterThan(0);
+      await expect(a.page.locator('#challenge-outcome')).toBeHidden(); // not a challenge run
+      await dismissLevelUp(a.page);
+      await a.page.locator('#challenge-friend-btn').click();
+      await expect(a.page.locator('#ui-toast')).toContainText('Challenge link copied', { timeout: 5000 });
+      const clip = await a.page.evaluate(() => navigator.clipboard.readText());
+      const link = (clip.match(/https?:\/\/\S+\?c=[A-Za-z0-9_-]+/) || [])[0];
+      expect(link, 'clipboard holds the challenge link: ' + clip).toBeTruthy();
+      expect(link.startsWith(server.base + '/')).toBe(true);
+      expect(clip).toContain(`Guest typed ${wpmA} WPM`);
+      const spec = await a.page.evaluate(() => ShareCard.getLastRunChallengeSpec());
+      expect(spec.mode).toBe('words');
+      expect(spec.options.words).toBe(10);
+
+      // Player B opens the link in a fresh browser context.
+      await startReal(b.page, link);
+      const banner = b.page.locator('#challenge-banner');
+      await expect(banner).toBeVisible({ timeout: 10000 });
+      await expect(banner).toContainText(`Guest typed ${wpmA} WPM on this exact text. Beat it?`);
+      await banner.locator('button', { hasText: 'Try it' }).click();
+      await expect(banner).toBeHidden();
+      await expect(b.page.locator('#typing-area')).toBeVisible({ timeout: 5000 });
+      await expect(b.page.locator('.mode-tab[data-mode="words"]')).toHaveClass(/active/);
+      await expect.poll(() => b.page.evaluate(() => location.search)).not.toContain('c=');
+      await expect.poll(() => readTarget(b.page), { timeout: 5000 }).toBe(textA);
+      const specB = await b.page.evaluate(() => getCurrentTestSpec());
+      expect(specB.seed).toBe(spec.seed);
+
+      // B types faster (about 100 WPM), so B should win; the banner on the results card offers a rematch on the same text.
+      await completeRun(b.page, { delay: 120 });
+      const wpmB = await b.page.evaluate(() => Math.round(window.lastRunSummary.wpm));
+      const outcome = b.page.locator('#challenge-outcome');
+      await expect(outcome).toBeVisible();
+      if (wpmB > wpmA) {
+        await expect(outcome).toHaveClass(/win/);
+        await expect(outcome).toContainText(`You beat Guest: ${wpmB} vs ${wpmA} WPM!`);
+      } else {
+        await expect(outcome).toHaveClass(/lose/);
+        await expect(outcome).toContainText(`Guest still leads, ${wpmA} vs ${wpmB}. Try again?`);
+      }
+      await dismissLevelUp(b.page);
+      // A real click: the banner must sit inside the results card (css/social.css challengeOutcomeIn).
+      const rematch = outcome.locator('.challenge-rematch-btn');
+      await expect(rematch).toHaveText('Rematch');
+      await rematch.click();
+      await expect(b.page.locator('#result-overlay')).not.toHaveClass(/show/);
+      await expect(outcome).toBeHidden();
+      await expect.poll(() => readTarget(b.page), { timeout: 5000 }).toBe(textA);
+      // "New text" leaves the challenge: a different seed, and a later run shows no banner.
+      await b.page.evaluate(() => newTest());
+      await expect.poll(() => readTarget(b.page)).not.toBe(textA);
+      expect(a.errors).toEqual([]);
+      expect(b.errors).toEqual([]);
+    } finally {
+      await a.context.close();
+      await b.context.close();
+      await server.stop();
+    }
+  });
+
+  test('friends on a real server: two accounts, add, list, friends board, overtake toast, remove', async ({ browser }) => {
+    test.setTimeout(120000);
+    const server = await startTestServer();
+    const a = await realContext(browser, server.base);
+    const b = await realContext(browser, server.base);
+    const nameA = auditName('a');
+    const nameB = auditName('b');
+    try {
+      await startReal(a.page);
+      await startReal(b.page);
+      await signUp(a.page, nameA);
+      await signUp(b.page, nameB);
+      await useTenWords(a.page);
+      await useTenWords(b.page);
+      // B posts a counted, ranked run at about 70 WPM so B has a best on the boards.
+      await completeRun(b.page);
+      const runB = await b.page.evaluate(() => window.lastRunSummary);
+      expect(runB.counted && runB.ranked).toBe(true);
+      const wpmB = Math.round(runB.wpm);
+      await expect.poll(async () => b.page.evaluate(async () => (await (await fetch('/api/scores/me?limit=5', { credentials: 'include' })).json()).scores.length), { timeout: 10000 }).toBeGreaterThan(0);
+
+      // A adds B from the Friends tab.
+      await openBoard(a.page);
+      await a.page.locator('.lb-tab[data-tab="friends"]').click();
+      await expect(a.page.locator('#lb-friend-input')).toBeVisible({ timeout: 10000 });
+      await a.page.locator('#lb-friend-input').fill(nameB);
+      await a.page.locator('#lb-friend-add-btn').click();
+      await expect(a.page.locator('#lb-friends-note')).toHaveText(`Added ${nameB}.`, { timeout: 10000 });
+      const rowB = a.page.locator(`#leaderboard-list .lb-friend-row[data-friend="${nameB}"]`);
+      await expect(rowB).toBeVisible();
+      await expect(rowB).toContainText(String(wpmB));
+      await expect(a.page.locator('#leaderboard-list .lb-friend-row.lb-row-self')).toContainText(nameA);
+      // The list holds A's own row and B's row (the header row carries no data-friend).
+      await expect(a.page.locator('#leaderboard-list .lb-friend-row[data-friend]')).toHaveCount(2);
+      // Friends board (best runs of you and your friends) lists B; A has no run yet.
+      const board = a.page.locator('#lb-friends-board');
+      await expect(board).toContainText('Best runs', { timeout: 10000 });
+      await expect(board.locator('.lb-score-row:not(.lb-head)')).toHaveCount(1, { timeout: 10000 });
+      await expect(board.locator('.lb-score-row:not(.lb-head) .lb-user')).toHaveText(nameB);
+      // Server agrees.
+      const friends = await a.page.evaluate(async () => (await (await fetch('/api/friends', { credentials: 'include' })).json()).friends.map((f) => f.username));
+      expect(friends).toEqual([nameB]);
+      // Friendship is one way: B's list is empty.
+      const friendsOfB = await b.page.evaluate(async () => (await (await fetch('/api/friends', { credentials: 'include' })).json()).friends);
+      expect(friendsOfB).toEqual([]);
+
+      // A finishes a faster run (about 100 WPM): the overtake toast names B.
+      await a.page.evaluate(() => closeLeaderboard());
+      await expect(a.page.locator('#leaderboard-modal')).not.toHaveClass(/show/);
+      await completeRun(a.page, { delay: 120 });
+      const runA = await a.page.evaluate(() => window.lastRunSummary);
+      expect(runA.counted && runA.ranked).toBe(true);
+      if (Math.round(runA.wpm) > wpmB) {
+        await expect(a.page.locator('#ui-toast')).toContainText(`You passed ${nameB}'s`, { timeout: 5000 });
+      }
+      await dismissLevelUp(a.page);
+      await a.page.evaluate(() => closeResults());
+
+      // Remove B.
+      await openBoard(a.page);
+      await a.page.locator('.lb-tab[data-tab="friends"]').click();
+      await expect(rowB).toBeVisible({ timeout: 10000 });
+      await rowB.locator('.lb-mini-danger').click();
+      await expect(rowB).toHaveCount(0, { timeout: 10000 });
+      const after = await a.page.evaluate(async () => (await (await fetch('/api/friends', { credentials: 'include' })).json()).friends);
+      expect(after).toEqual([]);
+      expect(a.errors).toEqual([]);
+      expect(b.errors).toEqual([]);
+    } finally {
+      await a.context.close();
+      await b.context.close();
+      await server.stop();
+    }
   });
 });

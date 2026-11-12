@@ -13,8 +13,8 @@
     --social-gloss: linear-gradient(180deg, rgba(255, 255, 255, 0.16) 0%, rgba(255, 255, 255, 0.03) 48%, rgba(0, 0, 0, 0.18) 100%);
 }
 
-/* Base button fallbacks (the UI agent defines .btn in styles.css; these keep ours usable before then) */
-.btn {
+/* Button fallbacks, disabled: styles.css owns .btn now. Kept scoped under an unused class so they never override it. */
+.lb-fallback-unused .btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -30,17 +30,17 @@
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 4px 12px rgba(0, 0, 0, 0.25);
     transition: transform 0.28s var(--social-spring), box-shadow 0.2s ease, background 0.2s ease;
 }
-.btn:hover { transform: translateY(-1px) scale(1.03); background: var(--social-surface); }
-.btn-primary {
+.lb-fallback-unused .btn:hover { transform: translateY(-1px) scale(1.03); background: var(--social-surface); }
+.lb-fallback-unused .btn-primary {
     background: linear-gradient(180deg, #6ae8f6 0%, var(--social-accent) 45%, #15a7bb 100%);
     border-color: rgba(63, 217, 236, 0.8);
     color: #06202a;
     text-shadow: 0 1px 0 rgba(255, 255, 255, 0.35);
 }
-.btn-primary:hover { background: linear-gradient(180deg, #86eefa 0%, #52e1f1 45%, #19b3c8 100%); }
-.btn-secondary { background: linear-gradient(180deg, rgba(63, 217, 236, 0.22), rgba(63, 217, 236, 0.06)); }
-.btn-ghost { background: transparent; box-shadow: none; }
-.btn-ghost:hover { background: rgba(63, 217, 236, 0.1); }
+.lb-fallback-unused .btn-primary:hover { background: linear-gradient(180deg, #86eefa 0%, #52e1f1 45%, #19b3c8 100%); }
+.lb-fallback-unused .btn-secondary { background: linear-gradient(180deg, rgba(63, 217, 236, 0.22), rgba(63, 217, 236, 0.06)); }
+.lb-fallback-unused .btn-ghost { background: transparent; box-shadow: none; }
+.lb-fallback-unused .btn-ghost:hover { background: rgba(63, 217, 236, 0.1); }
 
 /* ── Leaderboard modal layout ── */
 #leaderboard-modal .leaderboard-modal-card {
@@ -545,4 +545,52 @@
     .admin-actions { grid-template-columns: 1fr; }
     #community-hub-modal .leaderboard-modal-card { padding: 0.7rem 0.6rem 0.8rem; max-height: 94vh; }
     .social-banner { top: 3.6rem; width: calc(100vw - 1rem); max-width: none; border-radius: 22px; }
+}
+
+/* ── Social wave 2 (appended): board titles, challenge links, owned colours ── */
+.lb-user-title {
+    display: inline-block;
+    margin-left: 0.3rem;
+    padding: 0.05rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    line-height: 1.4;
+    color: var(--text-muted, #a9b9d6);
+    background: rgba(63, 217, 236, 0.12);
+    border: 1px solid rgba(63, 217, 236, 0.3);
+    vertical-align: middle;
+    white-space: nowrap;
+}
+.challenge-friend-btn { white-space: nowrap; border-radius: 999px; }
+.challenge-outcome {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0 0 0.8rem;
+    padding: 0.6rem 0.9rem;
+    border-radius: 22px;
+    border: 1px solid rgba(63, 217, 236, 0.35);
+    background: var(--surface, rgba(10, 26, 56, 0.85));
+    color: var(--text, #f3f6ff);
+    font-weight: 700;
+    font-size: 0.9rem;
+    animation: challengeOutcomeIn 0.5s var(--social-spring, cubic-bezier(.34,1.56,.64,1)) both;
+}
+.challenge-outcome[hidden] { display: none; }
+.challenge-outcome.win { border-color: rgba(255, 179, 71, 0.65); box-shadow: 0 0 18px rgba(255, 179, 71, 0.25); }
+.challenge-outcome.lose { border-color: rgba(63, 217, 236, 0.35); }
+.challenge-outcome-text { flex: 1 1 200px; line-height: 1.35; }
+.challenge-outcome-actions { display: inline-flex; flex-wrap: wrap; gap: 0.4rem; }
+.challenge-outcome-actions button { border-radius: 999px; padding: 0.3rem 0.8rem; font-size: 0.78rem; white-space: nowrap; }
+.shop-owned-colour .inventory-item-name { display: inline-flex; align-items: center; gap: 0.4rem; }
+@media (prefers-reduced-motion: reduce) { .challenge-outcome { animation: none; } }
+@media (max-width: 480px) { .lb-user-title { display: none; } }
+
+/* The results-card challenge banner is not centred with translate(-50%), so it gets its own pop-in. */
+@keyframes challengeOutcomeIn {
+    from { opacity: 0; transform: translateY(-10px) scale(0.96); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
 }

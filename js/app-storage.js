@@ -269,6 +269,15 @@ function recomputeSkillPoints(xpRaw, skillsRaw, fallbackRaw) {
     return String(recomputed);
 }
 
+// For small JSON records of counters: keep the larger value of each listed field.
+function mergeMaxFields(remoteRaw, localRaw, fields) {
+    const r = parseProgressJsonSafe(remoteRaw || '{}', {}) || {};
+    const l = parseProgressJsonSafe(localRaw || '{}', {}) || {};
+    const out = {};
+    for (const f of fields) out[f] = Math.max(0, Math.floor(Number(r[f]) || 0), Math.floor(Number(l[f]) || 0));
+    return JSON.stringify(out);
+}
+
 function mergeProgressSnapshotsForSameOwner(remoteProgress = {}, localProgress = {}) {
     const remote = remoteProgress && typeof remoteProgress === 'object' ? remoteProgress : {};
     const local = localProgress && typeof localProgress === 'object' ? localProgress : {};
@@ -316,6 +325,8 @@ function mergeProgressSnapshotsForSameOwner(remoteProgress = {}, localProgress =
         else if (key === 'sampire-weekly-rival-target') value = mergeDatedRecord(r, l, 'week');
         else if (key === 'sampire-streak') value = mergeStreak(r, l);
         else if (key === 'sampire-skills') value = mergeSkills(r, l);
+        else if (key === 'sampire-crystal-ledger') value = mergeMaxFields(r, l, ['spent', 'bonus']);
+        else if (key === 'sampire-lifetime-counters') value = mergeMaxFields(r, l, ['daysPlayed', 'perfectRuns', 'countedRuns']);
         else if (key === 'sampire-badges') value = null; // handled below
         else if (key === 'sampire-skill-points') value = null; // recomputed below
         else if (localFirstKeys.has(key)) value = l;
@@ -1194,8 +1205,13 @@ async function localApiFetch(url, options = {}, headers = {}) {
             return { user: localAdminSummary(user) };
         }
         if (method === 'PATCH') {
-            const DAILY_IDS = ['nobackspace', 'sprint', 'perfectionist', 'daily_quotes_5', 'daily_words_5', 'daily_words30_5'];
-            const WEEKLY_IDS = ['marathon', 'consistent_climber', 'rival_week', 'above_average'];
+            // Same order as functions/api/_lib.js and the quest pools in app-progression.js.
+            const DAILY_IDS = (typeof DAILY_QUEST_POOL !== 'undefined' && Array.isArray(DAILY_QUEST_POOL) && DAILY_QUEST_POOL.length)
+                ? DAILY_QUEST_POOL.map((q) => q.id)
+                : ['runs_5', 'daily_quotes_5', 'words_500', 'acc_96', 'drills_3', 'nobackspace', 'beat_avg', 'beat_yesterday'];
+            const WEEKLY_IDS = (typeof WEEKLY_QUESTS !== 'undefined' && Array.isArray(WEEKLY_QUESTS) && WEEKLY_QUESTS.length)
+                ? WEEKLY_QUESTS.map((q) => q.id)
+                : ['marathon', 'days_5', 'beat_last_week', 'runs95_10', 'above_average', 'consistent_climber'];
             const ACHIEVEMENT_IDS = (typeof BADGE_DEFS !== 'undefined' ? BADGE_DEFS : []).map((def) => def.id);
             const clampInt = (value, min, max = Infinity) => {
                 if (value == null || value === '') return null;
@@ -1249,7 +1265,8 @@ async function localApiFetch(url, options = {}, headers = {}) {
                 if (['aura', 'soundscapes', 'nebulaTrail'].includes(String(reward))) skills[String(reward)] = true;
             }
             if (setStreakDays !== null) {
-                progress['sampire-streak'] = JSON.stringify({ lastPlayDate: todayKey, streak: setStreakDays });
+                const prevStreak = parseProgressJsonSafe(progress['sampire-streak'] || '{}', {});
+                progress['sampire-streak'] = JSON.stringify({ lastPlayDate: todayKey, streak: setStreakDays, freezes: Math.min(2, Math.max(0, Math.floor(Number(prevStreak && prevStreak.freezes) || 0))) });
             }
             if (setDailyCompleted !== null) {
                 const days = readDailyDays(progress['sampire-daily-v2']);
@@ -1264,6 +1281,16 @@ async function localApiFetch(url, options = {}, headers = {}) {
                 progress['sampire-badges'] = JSON.stringify(idsForCount(ACHIEVEMENT_IDS, setAchievements).map((id) => ({ id, earnedAt: now })));
             }
             progress['sampire-xp'] = String(Math.max(0, xp));
+            // Crystals are derived from the ledger (levels + words + bonus - spent); grants go into ledger.bonus.
+            if (setSkillPoints !== null || addSkillPoints > 0) {
+                const ledger = parseProgressJsonSafe(progress['sampire-crystal-ledger'] || '{}', {});
+                const spent = Math.max(0, Math.floor(Number(ledger && ledger.spent) || 0));
+                let bonus = Math.max(0, Math.floor(Number(ledger && ledger.bonus) || 0));
+                const cachedBefore = Math.max(0, parseInt(progress['sampire-skill-points'] || '0', 10) || 0);
+                if (setSkillPoints !== null) bonus = Math.max(0, bonus + (setSkillPoints - cachedBefore));
+                bonus += addSkillPoints;
+                progress['sampire-crystal-ledger'] = JSON.stringify({ spent, bonus });
+            }
             progress['sampire-skill-points'] = String(Math.max(0, sp));
             progress['sampire-skills'] = JSON.stringify({ ...skills, aura: !!skills.aura, soundscapes: !!skills.soundscapes, nebulaTrail: !!skills.nebulaTrail });
             if (resetUsernameRaw) {

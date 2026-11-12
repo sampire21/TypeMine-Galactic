@@ -34,6 +34,27 @@ function lbLevelTitle(level) {
     return `Level ${tier.level}, ${tier.name}`;
 }
 
+// The logged-in player's equipped name colour and title. sampire-title is written by the
+// progression code as { title, nameColor, nameColorValue, ... }; the title must still be unlocked.
+function lbSelfCosmetics() {
+    let raw = null;
+    try {
+        raw = typeof loadLocalJson === 'function'
+            ? loadLocalJson('sampire-title', null)
+            : JSON.parse(localStorage.getItem('sampire-title') || 'null');
+    } catch (e) { raw = null; }
+    const colour = String(raw && raw.nameColorValue || '').trim();
+    const title = String(raw && raw.title || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 24);
+    let titleOk = !!title;
+    if (titleOk && typeof getUnlockedTitles === 'function') {
+        try { titleOk = getUnlockedTitles().includes(title); } catch (e) { titleOk = false; }
+    }
+    return {
+        nameColorValue: /^#[0-9a-f]{3,8}$/i.test(colour) ? colour : '',
+        title: titleOk ? title : '',
+    };
+}
+
 // Cloud vs local mode. The backend exposes window.isCloudMode() once it boots; until then
 // we probe /api/health once and treat a 404 as "no backend here".
 function socialIsCloudMode() {

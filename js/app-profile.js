@@ -404,11 +404,25 @@ function renderShopOwnedSection() {
     const packs = (Array.isArray(window.SHOP_KEY_SOUND_PACKS) ? window.SHOP_KEY_SOUND_PACKS : (typeof SHOP_KEY_SOUND_PACKS !== 'undefined' ? SHOP_KEY_SOUND_PACKS : []))
         .filter((pack) => typeof isKeySoundPackUnlocked === 'function' && isKeySoundPackUnlocked(pack.id))
         .map((pack) => ({ id: pack.id, name: pack.label, desc: pack.desc, equipped: (typeof keySoundPackName !== 'undefined') && keySoundPackName === pack.id }));
-    const total = rewards.length + packs.length;
+    // Name, cursor and trail colours bought in the shop (getSkillsState().cosmetics), with the one in use marked.
+    const eq = typeof getEquippedCosmetics === 'function' ? getEquippedCosmetics() : {};
+    const colourKinds = ['nameColor', 'caretColor', 'trailColor'];
+    const colourValues = typeof COSMETIC_COLORS !== 'undefined' ? COSMETIC_COLORS : {};
+    const colours = (Array.isArray(window.SHOP_ITEMS) ? window.SHOP_ITEMS : [])
+        .filter((item) => colourKinds.includes(item.kind) && !!(owned.cosmetics && owned.cosmetics[item.id]))
+        .map((item) => ({ id: item.id, kind: item.kind, name: item.name, desc: item.desc, inUse: eq[item.kind] === item.id, colour: colourValues[item.id] || '' }));
+    const total = rewards.length + packs.length + colours.length;
     if (total === 0) {
         wrap.innerHTML = `<div class="profile-section-title">Owned</div><div class="inventory-empty">You do not own anything yet. Buy something above and it shows up here.</div>`;
         return;
     }
+    const colourHtml = colours.map((item) => `<div class="inventory-item shop-owned-item shop-owned-colour">
+            <div class="inventory-item-top">
+                <span class="inventory-item-name"><span class="shop-color-swatch${item.colour === 'rainbow' ? ' rainbow' : ''}" style="${item.colour && item.colour !== 'rainbow' ? `--swatch:${escapeHtml(item.colour)}` : ''}" aria-hidden="true"></span> ${escapeHtml(item.name)}</span>
+                <button type="button" class="inventory-toggle ${item.inUse ? 'on' : ''}" onclick="equipCosmetic('${escapeHtml(item.kind)}', '${item.inUse ? '' : escapeHtml(item.id)}'); renderShopOwnedSection();" aria-pressed="${item.inUse ? 'true' : 'false'}">${item.inUse ? 'Turn off' : 'Use this'}</button>
+            </div>
+            <div class="inventory-item-desc">${escapeHtml(item.desc)}</div>
+        </div>`).join('');
     const rewardHtml = rewards.map((item) => {
         const on = settings[item.id] !== false;
         return `<div class="inventory-item shop-owned-item">
@@ -428,7 +442,7 @@ function renderShopOwnedSection() {
         </div>`).join('');
     wrap.innerHTML = `
         <div class="profile-section-title">Owned <span class="profile-section-sub">(${total})</span></div>
-        <div class="shop-owned-grid">${rewardHtml}${packHtml}</div>`;
+        <div class="shop-owned-grid">${rewardHtml}${colourHtml}${packHtml}</div>`;
 }
 window.renderShopOwnedSection = renderShopOwnedSection;
 
@@ -688,7 +702,7 @@ function renderProfile(scores) {
         : 'the beta';
 
     const modes = ['quotes', 'words', 'words30'];
-    const modeLabels = { quotes: 'Quotes', words: 'Random Words', words30: 'Words 30s' };
+    const modeLabels = { quotes: 'Quotes', words: 'Random Words', words30: 'Timed' };
     const bestByMode = {};
     for (const m of modes) {
         const ms = scores.filter(s => s.mode === m);

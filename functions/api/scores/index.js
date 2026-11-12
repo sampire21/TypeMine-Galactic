@@ -39,6 +39,18 @@ function num(value) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+// Equipped title from the synced progress record (sampire-title = JSON { title, ... }), 24 chars max.
+// The client escapes it on render.
+function titleOf(progress) {
+  try {
+    const raw = progress && progress['sampire-title'];
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return String(parsed && parsed.title || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 24);
+  } catch {
+    return '';
+  }
+}
+
 // Returns { ok: true, score } or { ok: false, error }.
 export function validateScorePayload(body, nowMs = Date.now()) {
   const mode = normalizeMode(body.mode);
@@ -62,8 +74,10 @@ export function validateScorePayload(body, nowMs = Date.now()) {
   const timedSeconds = TIMED_MODE_SECONDS[mode];
   if (timedSeconds) {
     if (Math.abs(time - timedSeconds) > 1) return { ok: false, error: `Time for ${mode} must be ${timedSeconds} seconds` };
-  } else if (time < 10 || time > 3600) {
-    return { ok: false, error: 'Runs shorter than 10 seconds do not count' };
+  } else if (typedWords < 10 || time < 1 || time > 3600) {
+    // Same rule the client uses for a counted run (README interface item 2): at least 10 words.
+    // A 10-word test typed at 70 WPM takes about 8 seconds, so a fixed time floor would reject real runs.
+    return { ok: false, error: 'Runs shorter than 10 words do not count' };
   }
 
   // WPM is standard: five characters make one word.
@@ -114,8 +128,9 @@ export async function onRequestPost(context) {
   if (!check.ok) return json({ error: check.error }, 400);
 
   const progressPayload = await getJson(env, progressKey(user.id), null);
-  const level = levelFromXp(xpOf(progressOf(progressPayload)));
-  const score = { ...check.score, userId: user.id, username: user.username, level };
+  const progress = progressOf(progressPayload);
+  const level = levelFromXp(xpOf(progress));
+  const score = { ...check.score, userId: user.id, username: user.username, level, title: titleOf(progress) };
 
   const weekKey = getWeekKeyUtc(score.date);
   const atKey = allTimeBestKey(score.mode, user.id);

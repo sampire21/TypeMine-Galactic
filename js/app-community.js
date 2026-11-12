@@ -141,7 +141,7 @@ function getCommunityHubCardHtml() {
     const communityPct = Math.min(100, (totalWords / COMMUNITY_FLEET_TOTAL_HEALTH) * 100);
     const remaining = Math.max(0, COMMUNITY_FLEET_TOTAL_HEALTH - totalWords);
     const statusLine = fleet.allCleared
-        ? 'Goal reached. Everyone who typed 1,000 or more words this week gets the weekly badge.'
+        ? 'Goal reached. Everyone who typed 1,000 or more words this week gets the Team player badge.'
         : `${remaining.toLocaleString()} words to go. Every word you finish in any run counts, logged in or as a guest.`;
     return `
         <div class="community-goal-card">
@@ -153,7 +153,7 @@ function getCommunityHubCardHtml() {
                 <span class="community-goal-words">${escapeHtml(getTeamGoalWeekRangeLabel())}</span>
             </div>
             <div class="community-goal-sub">${escapeHtml(statusLine)}</div>
-            <div class="community-goal-reward">Reward: if the team reaches the goal, everyone who typed at least 1,000 words that week gets the weekly badge.</div>
+            <div class="community-goal-reward" title="Team player badge: type 1,000 words in a week where the team reaches its goal.">Reward: Team player badge. Type 1,000 words in a week where the team reaches its goal.</div>
             <div class="community-battle-scene" aria-hidden="true">
                 <span class="community-starfield layer-a"></span>
                 <span class="community-starfield layer-b"></span>
@@ -186,7 +186,7 @@ function getCommunityHubCardHtml() {
                             <span>${stageLabel}</span>
                         </div>
                         <div class="community-fleet-health">
-                            <div class="community-fleet-health-fill" style="width:${Math.max(0, Math.min(100, level.remainingPercent)).toFixed(2)}%"></div>
+                            <div class="community-fleet-health-fill" style="width:${Math.max(0, Math.min(100, 100 - level.remainingPercent)).toFixed(2)}%"></div>
                         </div>
                     </div>`;
                 }).join('')}
@@ -266,6 +266,9 @@ function handleCommunityHubBackdrop(event) {
 }
 
 // ── Score boards (All time, This week, Friends board) ───────────────────────
+// Name colour and title: the logged-in player's come from the local sampire-title record; other
+// players' titles come from the board row (the server copies it at submit time). Colour for others
+// is the level tier.
 function lbUserCellHtml(row, extraClass = '') {
     const username = String(row.username || 'Unknown').trim() || 'Unknown';
     const safeUsername = escapeHtml(username);
@@ -274,7 +277,19 @@ function lbUserCellHtml(row, extraClass = '') {
     const hasLevel = row.level !== undefined && row.level !== null;
     const tierClass = hasLevel ? ` ${tier.cssClass}` : '';
     const titleAttr = hasLevel ? ` title="${escapeHtml(lbLevelTitle(level))}"` : '';
-    return `<span class="lb-user lb-user-hover${tierClass}${extraClass ? ` ${extraClass}` : ''}" data-username="${safeUsername}" tabindex="0" role="button" aria-label="${safeUsername}${hasLevel ? `, ${escapeHtml(lbLevelTitle(level))}` : ''}. Show stats"${titleAttr}>${safeUsername}</span>`;
+    const isSelf = !!(currentUser && normalizeSummaryUsername(currentUser.username) === normalizeSummaryUsername(username));
+    const self = isSelf && typeof lbSelfCosmetics === 'function' ? lbSelfCosmetics() : null;
+    const playerTitle = lbRowTitle(row, self);
+    const styleAttr = self && self.nameColorValue ? ` style="color:${self.nameColorValue}"` : '';
+    const titleHtml = playerTitle ? ` <span class="lb-user-title">${escapeHtml(playerTitle)}</span>` : '';
+    const ariaBits = [playerTitle ? escapeHtml(playerTitle) : '', hasLevel ? escapeHtml(lbLevelTitle(level)) : ''].filter(Boolean).map((b) => `, ${b}`).join('');
+    return `<span class="lb-user lb-user-hover${tierClass}${extraClass ? ` ${extraClass}` : ''}" data-username="${safeUsername}" tabindex="0" role="button" aria-label="${safeUsername}${ariaBits}. Show stats"${titleAttr}${styleAttr}>${safeUsername}${titleHtml}</span>`;
+}
+
+function lbRowTitle(row, self = null) {
+    const local = self && self.title ? self.title : '';
+    const fromRow = String(row && row.title || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 24);
+    return local || fromRow;
 }
 
 function lbScoreRowHtml(row, idx, { crown = false, self = false } = {}) {
@@ -510,24 +525,34 @@ function handleLeaderboardBackdrop(event) {
 }
 
 // ── Friends ─────────────────────────────────────────────────────────────────
+// myBestWpm is null until we have seen the player's all-time best before a run; the all-time
+// overtake toast only fires once it is known, so a first run never fires it for every friend.
 function loadFriendsCache() {
     const raw = loadLocalJson(FRIENDS_CACHE_KEY, null);
-    if (!raw || typeof raw !== 'object') return { ts: 0, weekKey: '', friends: [], myWeeklyBest: 0 };
+    if (!raw || typeof raw !== 'object') return { ts: 0, weekKey: '', friends: [], myWeeklyBest: 0, myBestWpm: null };
+    const best = raw.myBestWpm === null || raw.myBestWpm === undefined ? null : Math.max(0, Number(raw.myBestWpm) || 0);
     return {
         ts: Number(raw.ts) || 0,
         weekKey: String(raw.weekKey || ''),
         friends: Array.isArray(raw.friends) ? raw.friends : [],
         myWeeklyBest: Math.max(0, Number(raw.myWeeklyBest) || 0),
+        myBestWpm: best,
     };
 }
 
 function saveFriendsCache(cache) {
+    const best = cache.myBestWpm === null || cache.myBestWpm === undefined ? null : Math.max(0, Number(cache.myBestWpm) || 0);
     saveLocalJson(FRIENDS_CACHE_KEY, {
         ts: Number(cache.ts) || Date.now(),
         weekKey: String(cache.weekKey || getWeekKeyUtc()),
         friends: Array.isArray(cache.friends) ? cache.friends.slice(0, 200) : [],
         myWeeklyBest: Math.max(0, Number(cache.myWeeklyBest) || 0),
+        myBestWpm: best,
     });
+}
+
+function getMyAllTimeBestWpmLocal() {
+    try { return Math.max(0, Math.round(Number(getLifetimeStatsSummary().bestWpm) || 0)); } catch (e) { return 0; }
 }
 
 function normalizeFriendRow(row) {
@@ -558,6 +583,7 @@ async function fetchFriendsList(force = false) {
             weekKey,
             friends,
             myWeeklyBest: cache.weekKey === weekKey ? cache.myWeeklyBest : 0,
+            myBestWpm: cache.myBestWpm === null ? getMyAllTimeBestWpmLocal() : Math.max(cache.myBestWpm, getMyAllTimeBestWpmLocal()),
         });
     } catch (e) {
         const status = Number(e && e.status) || 0;
@@ -589,8 +615,9 @@ function getMyFriendRow() {
 
 function friendRowHtml(row, { self = false } = {}) {
     const safe = escapeHtml(row.username);
+    const mine = self && typeof lbSelfCosmetics === 'function' ? lbSelfCosmetics() : null;
     const nameCell = self
-        ? `<span class="lb-user lb-user-self">${safe} <span class="lb-you-tag">you</span></span>`
+        ? `<span class="lb-user lb-user-self"${mine && mine.nameColorValue ? ` style="color:${mine.nameColorValue}"` : ''}>${safe}${mine && mine.title ? ` <span class="lb-user-title">${escapeHtml(mine.title)}</span>` : ''} <span class="lb-you-tag">you</span></span>`
         : lbUserCellHtml(row);
     const actions = self
         ? ''
@@ -802,7 +829,7 @@ async function removeFriend(username) {
 }
 window.removeFriend = removeFriend;
 
-// Toast when a run beats a friend's weekly best. Listens for the shared run-finished event.
+// Toast when a run beats a friend's weekly best or all-time best. Listens for the shared run-finished event.
 function checkFriendOvertake(summary) {
     if (!summary || summary.counted === false) return;
     const wpm = Math.round(Number(summary.wpm) || 0);
@@ -813,18 +840,33 @@ function checkFriendOvertake(summary) {
         cache.weekKey = weekKey;
         cache.myWeeklyBest = 0;
     }
+    const friends = cache.friends.map(normalizeFriendRow);
     const prevBest = Math.max(cache.myWeeklyBest, 0);
-    const passed = cache.friends
-        .map(normalizeFriendRow)
+    const passed = friends
         .filter((f) => f.weeklyBestWpm > 0 && prevBest <= f.weeklyBestWpm && wpm > f.weeklyBestWpm)
         .sort((a, b) => b.weeklyBestWpm - a.weeklyBestWpm);
     cache.myWeeklyBest = Math.max(prevBest, wpm);
+    // All-time: only when we knew the previous best (lifetime stats already include this run).
+    const prevAllTime = cache.myBestWpm;
+    const passedAllTime = (prevAllTime !== null && summary.isPB)
+        ? friends
+            .filter((f) => f.bestWpm > 0 && prevAllTime <= f.bestWpm && wpm > f.bestWpm)
+            .sort((a, b) => b.bestWpm - a.bestWpm)
+        : [];
+    cache.myBestWpm = Math.max(prevAllTime === null ? 0 : prevAllTime, wpm, getMyAllTimeBestWpmLocal());
     saveFriendsCache(cache);
+    if (passedAllTime.length > 0) {
+        const top = passedAllTime[0];
+        const extra = passedAllTime.length > 1 ? ` and ${passedAllTime.length - 1} more` : '';
+        showUiMessage(`You passed ${top.username}'s best, ${top.bestWpm} WPM${extra}`, 'success', 3600, 'top-left');
+        return;
+    }
     if (passed.length === 0) return;
     const top = passed[0];
     const extra = passed.length > 1 ? ` and ${passed.length - 1} more` : '';
     showUiMessage(`You passed ${top.username}'s weekly best, ${top.weeklyBestWpm} WPM${extra}`, 'success', 3600, 'top-left');
 }
+window.checkFriendOvertake = checkFriendOvertake;
 
 document.addEventListener('typemine:run-finished', (event) => {
     try {

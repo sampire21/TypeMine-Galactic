@@ -1,0 +1,252 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 984 366" width="984" height="366" role="img" aria-labelledby="fm-title fm-desc" class="finger-map">
+<title id="fm-title">Which finger presses each key</title>
+<desc id="fm-desc">A US keyboard. Each key is coloured by the finger that presses it: little finger pink, ring finger amber, middle finger yellow, index finger green, thumb teal. Home row keys are A S D F and J K L semicolon.</desc>
+<style>.finger-map text{font-family:Nunito,Ubuntu,Arial,sans-serif;font-weight:800;pointer-events:none}.finger-map .key{stroke:rgba(5,11,28,.55);stroke-width:1.5}.finger-map .key.mod{opacity:.55}.finger-map .key.home{stroke:#f3f6ff;stroke-opacity:.7;stroke-width:2}.finger-map .key.is-focus{stroke:#ffffff;stroke-opacity:1;stroke-width:6;filter:drop-shadow(0 0 10px #fff)}.finger-map .legend text{font-size:16px;font-weight:700;fill:#f3f6ff}</style>
+<g class="keycap" data-key="`" data-finger="little" data-hand="left">
+<rect class="key f-little" x="0" y="0" width="60" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="30" y="36" text-anchor="middle" font-size="22" fill="#0b1a38">`</text>
+</g>
+<g class="keycap" data-key="1" data-finger="little" data-hand="left">
+<rect class="key f-little" x="66" y="0" width="60" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="96" y="36" text-anchor="middle" font-size="22" fill="#0b1a38">1</text>
+</g>
+<g class="keycap" data-key="2" data-finger="ring" data-hand="left">
+<rect class="key f-ring" x="132" y="0" width="60" height="56" rx="10" ry="10" fill="#ffb347"/>
+<text x="162" y="36" text-anchor="middle" font-size="22" fill="#0b1a38">2</text>
+</g>
+<g class="keycap" data-key="3" data-finger="middle" data-hand="left">
+<rect class="key f-middle" x="198" y="0" width="60" height="56" rx="10" ry="10" fill="#ffd166"/>
+<text x="228" y="36" text-anchor="middle" font-size="22" fill="#0b1a38">3</text>
+</g>
+<g class="keycap" data-key="4" data-finger="index" data-hand="left">
+<rect class="key f-index" x="264" y="0" width="60" height="56" rx="10" ry="10" fill="#7ee787"/>
+<text x="294" y="36" text-anchor="middle" font-size="22" fill="#0b1a38">4</text>
+</g>
+<g class="keycap" data-key="5" data-finger="index" data-hand="left">
+<rect class="key f-index" x="330" y="0" width="60" height="56" rx="10" ry="10" fill="#7ee787"/>
+<text x="360" y="36" text-anchor="middle" font-size="22" fill="#0b1a38">5</text>
+</g>
+<g class="keycap" data-key="6" data-finger="index" data-hand="right">
+<rect class="key f-index" x="396" y="0" width="60" height="56" rx="10" ry="10" fill="#7ee787"/>
+<text x="426" y="36" text-anchor="middle" font-size="22" fill="#0b1a38">6</text>
+</g>
+<g class="keycap" data-key="7" data-finger="index" data-hand="right">
+<rect class="key f-index" x="462" y="0" width="60" height="56" rx="10" ry="10" fill="#7ee787"/>
+<text x="492" y="36" text-anchor="middle" font-size="22" fill="#0b1a38">7</text>
+</g>
+<g class="keycap" data-key="8" data-finger="middle" data-hand="right">
+<rect class="key f-middle" x="528" y="0" width="60" height="56" rx="10" ry="10" fill="#ffd166"/>
+<text x="558" y="36" text-anchor="middle" font-size="22" fill="#0b1a38">8</text>
+</g>
+<g class="keycap" data-key="9" data-finger="ring" data-hand="right">
+<rect class="key f-ring" x="594" y="0" width="60" height="56" rx="10" ry="10" fill="#ffb347"/>
+<text x="624" y="36" text-anchor="middle" font-size="22" fill="#0b1a38">9</text>
+</g>
+<g class="keycap" data-key="0" data-finger="little" data-hand="right">
+<rect class="key f-little" x="660" y="0" width="60" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="690" y="36" text-anchor="middle" font-size="22" fill="#0b1a38">0</text>
+</g>
+<g class="keycap" data-key="-" data-finger="little" data-hand="right">
+<rect class="key f-little" x="726" y="0" width="60" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="756" y="36" text-anchor="middle" font-size="22" fill="#0b1a38">-</text>
+</g>
+<g class="keycap" data-key="=" data-finger="little" data-hand="right">
+<rect class="key f-little" x="792" y="0" width="60" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="822" y="36" text-anchor="middle" font-size="22" fill="#0b1a38">=</text>
+</g>
+<g class="keycap" data-key="backspace" data-finger="little" data-hand="right">
+<rect class="key f-little mod" x="858" y="0" width="126" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="921" y="34" text-anchor="middle" font-size="17" fill="#f3f6ff">Backspace</text>
+</g>
+<g class="keycap" data-key="tab" data-finger="little" data-hand="left">
+<rect class="key f-little mod" x="0" y="62" width="93" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="46.5" y="96" text-anchor="middle" font-size="17" fill="#f3f6ff">Tab</text>
+</g>
+<g class="keycap" data-key="q" data-finger="little" data-hand="left">
+<rect class="key f-little" x="99" y="62" width="60" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="129" y="98" text-anchor="middle" font-size="22" fill="#0b1a38">Q</text>
+</g>
+<g class="keycap" data-key="w" data-finger="ring" data-hand="left">
+<rect class="key f-ring" x="165" y="62" width="60" height="56" rx="10" ry="10" fill="#ffb347"/>
+<text x="195" y="98" text-anchor="middle" font-size="22" fill="#0b1a38">W</text>
+</g>
+<g class="keycap" data-key="e" data-finger="middle" data-hand="left">
+<rect class="key f-middle" x="231" y="62" width="60" height="56" rx="10" ry="10" fill="#ffd166"/>
+<text x="261" y="98" text-anchor="middle" font-size="22" fill="#0b1a38">E</text>
+</g>
+<g class="keycap" data-key="r" data-finger="index" data-hand="left">
+<rect class="key f-index" x="297" y="62" width="60" height="56" rx="10" ry="10" fill="#7ee787"/>
+<text x="327" y="98" text-anchor="middle" font-size="22" fill="#0b1a38">R</text>
+</g>
+<g class="keycap" data-key="t" data-finger="index" data-hand="left">
+<rect class="key f-index" x="363" y="62" width="60" height="56" rx="10" ry="10" fill="#7ee787"/>
+<text x="393" y="98" text-anchor="middle" font-size="22" fill="#0b1a38">T</text>
+</g>
+<g class="keycap" data-key="y" data-finger="index" data-hand="right">
+<rect class="key f-index" x="429" y="62" width="60" height="56" rx="10" ry="10" fill="#7ee787"/>
+<text x="459" y="98" text-anchor="middle" font-size="22" fill="#0b1a38">Y</text>
+</g>
+<g class="keycap" data-key="u" data-finger="index" data-hand="right">
+<rect class="key f-index" x="495" y="62" width="60" height="56" rx="10" ry="10" fill="#7ee787"/>
+<text x="525" y="98" text-anchor="middle" font-size="22" fill="#0b1a38">U</text>
+</g>
+<g class="keycap" data-key="i" data-finger="middle" data-hand="right">
+<rect class="key f-middle" x="561" y="62" width="60" height="56" rx="10" ry="10" fill="#ffd166"/>
+<text x="591" y="98" text-anchor="middle" font-size="22" fill="#0b1a38">I</text>
+</g>
+<g class="keycap" data-key="o" data-finger="ring" data-hand="right">
+<rect class="key f-ring" x="627" y="62" width="60" height="56" rx="10" ry="10" fill="#ffb347"/>
+<text x="657" y="98" text-anchor="middle" font-size="22" fill="#0b1a38">O</text>
+</g>
+<g class="keycap" data-key="p" data-finger="little" data-hand="right">
+<rect class="key f-little" x="693" y="62" width="60" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="723" y="98" text-anchor="middle" font-size="22" fill="#0b1a38">P</text>
+</g>
+<g class="keycap" data-key="[" data-finger="little" data-hand="right">
+<rect class="key f-little" x="759" y="62" width="60" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="789" y="98" text-anchor="middle" font-size="22" fill="#0b1a38">[</text>
+</g>
+<g class="keycap" data-key="]" data-finger="little" data-hand="right">
+<rect class="key f-little" x="825" y="62" width="60" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="855" y="98" text-anchor="middle" font-size="22" fill="#0b1a38">]</text>
+</g>
+<g class="keycap" data-key="\" data-finger="little" data-hand="right">
+<rect class="key f-little" x="891" y="62" width="93" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="937.5" y="98" text-anchor="middle" font-size="22" fill="#0b1a38">\</text>
+</g>
+<g class="keycap" data-key="capslock" data-finger="little" data-hand="left">
+<rect class="key f-little mod" x="0" y="124" width="109.5" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="54.75" y="158" text-anchor="middle" font-size="17" fill="#f3f6ff">Caps</text>
+</g>
+<g class="keycap" data-key="a" data-finger="little" data-hand="left">
+<rect class="key f-little home" x="115.5" y="124" width="60" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="145.5" y="160" text-anchor="middle" font-size="22" fill="#0b1a38">A</text>
+</g>
+<g class="keycap" data-key="s" data-finger="ring" data-hand="left">
+<rect class="key f-ring home" x="181.5" y="124" width="60" height="56" rx="10" ry="10" fill="#ffb347"/>
+<text x="211.5" y="160" text-anchor="middle" font-size="22" fill="#0b1a38">S</text>
+</g>
+<g class="keycap" data-key="d" data-finger="middle" data-hand="left">
+<rect class="key f-middle home" x="247.5" y="124" width="60" height="56" rx="10" ry="10" fill="#ffd166"/>
+<text x="277.5" y="160" text-anchor="middle" font-size="22" fill="#0b1a38">D</text>
+</g>
+<g class="keycap" data-key="f" data-finger="index" data-hand="left">
+<rect class="key f-index home" x="313.5" y="124" width="60" height="56" rx="10" ry="10" fill="#7ee787"/>
+<text x="343.5" y="160" text-anchor="middle" font-size="22" fill="#0b1a38">F</text>
+<rect x="334.5" y="169" width="18" height="3" rx="1.5" fill="#0b1a38" opacity=".8"/>
+</g>
+<g class="keycap" data-key="g" data-finger="index" data-hand="left">
+<rect class="key f-index" x="379.5" y="124" width="60" height="56" rx="10" ry="10" fill="#7ee787"/>
+<text x="409.5" y="160" text-anchor="middle" font-size="22" fill="#0b1a38">G</text>
+</g>
+<g class="keycap" data-key="h" data-finger="index" data-hand="right">
+<rect class="key f-index" x="445.5" y="124" width="60" height="56" rx="10" ry="10" fill="#7ee787"/>
+<text x="475.5" y="160" text-anchor="middle" font-size="22" fill="#0b1a38">H</text>
+</g>
+<g class="keycap" data-key="j" data-finger="index" data-hand="right">
+<rect class="key f-index home" x="511.5" y="124" width="60" height="56" rx="10" ry="10" fill="#7ee787"/>
+<text x="541.5" y="160" text-anchor="middle" font-size="22" fill="#0b1a38">J</text>
+<rect x="532.5" y="169" width="18" height="3" rx="1.5" fill="#0b1a38" opacity=".8"/>
+</g>
+<g class="keycap" data-key="k" data-finger="middle" data-hand="right">
+<rect class="key f-middle home" x="577.5" y="124" width="60" height="56" rx="10" ry="10" fill="#ffd166"/>
+<text x="607.5" y="160" text-anchor="middle" font-size="22" fill="#0b1a38">K</text>
+</g>
+<g class="keycap" data-key="l" data-finger="ring" data-hand="right">
+<rect class="key f-ring home" x="643.5" y="124" width="60" height="56" rx="10" ry="10" fill="#ffb347"/>
+<text x="673.5" y="160" text-anchor="middle" font-size="22" fill="#0b1a38">L</text>
+</g>
+<g class="keycap" data-key=";" data-finger="little" data-hand="right">
+<rect class="key f-little home" x="709.5" y="124" width="60" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="739.5" y="160" text-anchor="middle" font-size="22" fill="#0b1a38">;</text>
+</g>
+<g class="keycap" data-key="&#39;" data-finger="little" data-hand="right">
+<rect class="key f-little" x="775.5" y="124" width="60" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="805.5" y="160" text-anchor="middle" font-size="22" fill="#0b1a38">&#39;</text>
+</g>
+<g class="keycap" data-key="enter" data-finger="little" data-hand="right">
+<rect class="key f-little mod" x="841.5" y="124" width="142.5" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="912.75" y="158" text-anchor="middle" font-size="17" fill="#f3f6ff">Enter</text>
+</g>
+<g class="keycap" data-key="shift" data-finger="little" data-hand="left">
+<rect class="key f-little mod" x="0" y="186" width="142.5" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="71.25" y="220" text-anchor="middle" font-size="17" fill="#f3f6ff">Shift</text>
+</g>
+<g class="keycap" data-key="z" data-finger="little" data-hand="left">
+<rect class="key f-little" x="148.5" y="186" width="60" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="178.5" y="222" text-anchor="middle" font-size="22" fill="#0b1a38">Z</text>
+</g>
+<g class="keycap" data-key="x" data-finger="ring" data-hand="left">
+<rect class="key f-ring" x="214.5" y="186" width="60" height="56" rx="10" ry="10" fill="#ffb347"/>
+<text x="244.5" y="222" text-anchor="middle" font-size="22" fill="#0b1a38">X</text>
+</g>
+<g class="keycap" data-key="c" data-finger="middle" data-hand="left">
+<rect class="key f-middle" x="280.5" y="186" width="60" height="56" rx="10" ry="10" fill="#ffd166"/>
+<text x="310.5" y="222" text-anchor="middle" font-size="22" fill="#0b1a38">C</text>
+</g>
+<g class="keycap" data-key="v" data-finger="index" data-hand="left">
+<rect class="key f-index" x="346.5" y="186" width="60" height="56" rx="10" ry="10" fill="#7ee787"/>
+<text x="376.5" y="222" text-anchor="middle" font-size="22" fill="#0b1a38">V</text>
+</g>
+<g class="keycap" data-key="b" data-finger="index" data-hand="left">
+<rect class="key f-index" x="412.5" y="186" width="60" height="56" rx="10" ry="10" fill="#7ee787"/>
+<text x="442.5" y="222" text-anchor="middle" font-size="22" fill="#0b1a38">B</text>
+</g>
+<g class="keycap" data-key="n" data-finger="index" data-hand="right">
+<rect class="key f-index" x="478.5" y="186" width="60" height="56" rx="10" ry="10" fill="#7ee787"/>
+<text x="508.5" y="222" text-anchor="middle" font-size="22" fill="#0b1a38">N</text>
+</g>
+<g class="keycap" data-key="m" data-finger="index" data-hand="right">
+<rect class="key f-index" x="544.5" y="186" width="60" height="56" rx="10" ry="10" fill="#7ee787"/>
+<text x="574.5" y="222" text-anchor="middle" font-size="22" fill="#0b1a38">M</text>
+</g>
+<g class="keycap" data-key="," data-finger="middle" data-hand="right">
+<rect class="key f-middle" x="610.5" y="186" width="60" height="56" rx="10" ry="10" fill="#ffd166"/>
+<text x="640.5" y="222" text-anchor="middle" font-size="22" fill="#0b1a38">,</text>
+</g>
+<g class="keycap" data-key="." data-finger="ring" data-hand="right">
+<rect class="key f-ring" x="676.5" y="186" width="60" height="56" rx="10" ry="10" fill="#ffb347"/>
+<text x="706.5" y="222" text-anchor="middle" font-size="22" fill="#0b1a38">.</text>
+</g>
+<g class="keycap" data-key="/" data-finger="little" data-hand="right">
+<rect class="key f-little" x="742.5" y="186" width="60" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="772.5" y="222" text-anchor="middle" font-size="22" fill="#0b1a38">/</text>
+</g>
+<g class="keycap" data-key="shift" data-finger="little" data-hand="right">
+<rect class="key f-little mod" x="808.5" y="186" width="175.5" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="896.25" y="220" text-anchor="middle" font-size="17" fill="#f3f6ff">Shift</text>
+</g>
+<g class="keycap" data-key="control" data-finger="little" data-hand="left">
+<rect class="key f-little mod" x="0" y="248" width="93" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="46.5" y="282" text-anchor="middle" font-size="17" fill="#f3f6ff">Ctrl</text>
+</g>
+<g class="keycap" data-key="alt" data-finger="thumb" data-hand="left">
+<rect class="key f-thumb mod" x="99" y="248" width="93" height="56" rx="10" ry="10" fill="#3fd9ec"/>
+<text x="145.5" y="282" text-anchor="middle" font-size="17" fill="#f3f6ff">Alt</text>
+</g>
+<g class="keycap" data-key=" " data-finger="thumb" data-hand="right">
+<rect class="key f-thumb mod" x="198" y="248" width="588" height="56" rx="10" ry="10" fill="#3fd9ec"/>
+<text x="492" y="282" text-anchor="middle" font-size="17" fill="#f3f6ff">Space</text>
+</g>
+<g class="keycap" data-key="alt" data-finger="thumb" data-hand="right">
+<rect class="key f-thumb mod" x="792" y="248" width="93" height="56" rx="10" ry="10" fill="#3fd9ec"/>
+<text x="838.5" y="282" text-anchor="middle" font-size="17" fill="#f3f6ff">Alt</text>
+</g>
+<g class="keycap" data-key="control" data-finger="little" data-hand="right">
+<rect class="key f-little mod" x="891" y="248" width="93" height="56" rx="10" ry="10" fill="#ff6b8a"/>
+<text x="937.5" y="282" text-anchor="middle" font-size="17" fill="#f3f6ff">Ctrl</text>
+</g>
+<g class="legend">
+<rect x="0" y="328" width="22" height="22" rx="7" fill="#ff6b8a"/>
+<text x="30" y="345">Little finger</text>
+<rect x="164" y="328" width="22" height="22" rx="7" fill="#ffb347"/>
+<text x="194" y="345">Ring finger</text>
+<rect x="328" y="328" width="22" height="22" rx="7" fill="#ffd166"/>
+<text x="358" y="345">Middle finger</text>
+<rect x="492" y="328" width="22" height="22" rx="7" fill="#7ee787"/>
+<text x="522" y="345">Index finger</text>
+<rect x="656" y="328" width="22" height="22" rx="7" fill="#3fd9ec"/>
+<text x="686" y="345">Thumb</text>
+<rect x="820" y="328" width="22" height="22" rx="7" fill="#2b3f6b" stroke="#f3f6ff" stroke-width="2.5"/>
+<text x="850" y="345">Home row</text>
+</g></svg>

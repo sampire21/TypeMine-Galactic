@@ -56,6 +56,12 @@ export const KNOWN_PROGRESS_KEYS = [
   'sampire-mining-state-v1',
   'sampire-weekly-words',
   'sampire-friends-cache',
+  'sampire-daily-stats',
+  'sampire-lifetime-counters',
+  'sampire-crystal-ledger',
+  'sampire-title',
+  'sampire-weekly-recap-seen',
+  'sampire-coach',
 ];
 
 const INT_RANGES = {
@@ -103,7 +109,8 @@ export function sanitizeProgress(input, options = {}) {
   }
 
   const jsonKeys = ['sampire-typing-history', 'sampire-streak', 'sampire-badges', 'sampire-daily', 'sampire-daily-v2', 'sampire-weekly',
-    'sampire-weekly-rival-target', 'sampire-skills', 'sampire-reward-settings', 'sampire-mining-state-v1', 'sampire-weekly-words', 'sampire-friends-cache'];
+    'sampire-weekly-rival-target', 'sampire-skills', 'sampire-reward-settings', 'sampire-mining-state-v1', 'sampire-weekly-words', 'sampire-friends-cache',
+    'sampire-daily-stats', 'sampire-lifetime-counters', 'sampire-crystal-ledger', 'sampire-title', 'sampire-coach'];
   for (const key of jsonKeys) {
     if (out[key] == null) continue;
     const parsed = parseJsonSafe(out[key], undefined);
@@ -128,7 +135,34 @@ export function sanitizeProgress(input, options = {}) {
     const s = parseJsonSafe(out['sampire-streak'], {});
     const streak = Math.min(100000, Math.max(0, Math.floor(Number(s && s.streak) || 0)));
     const lastPlayDate = /^\d{4}-\d{2}-\d{2}$/.test(String(s && s.lastPlayDate || '')) ? String(s.lastPlayDate) : '';
-    out['sampire-streak'] = JSON.stringify({ lastPlayDate, streak });
+    const freezes = Math.min(2, Math.max(0, Math.floor(Number(s && s.freezes) || 0)));
+    out['sampire-streak'] = JSON.stringify({ lastPlayDate, streak, freezes });
+  }
+
+  // Crystal ledger: balance is derived on the client from levels + words + bonus - spent.
+  if (out['sampire-crystal-ledger'] != null) {
+    const l = parseJsonSafe(out['sampire-crystal-ledger'], {});
+    const spent = Math.min(1000000, Math.max(0, Math.floor(Number(l && l.spent) || 0)));
+    const bonus = Math.min(1000000, Math.max(0, Math.floor(Number(l && l.bonus) || 0)));
+    out['sampire-crystal-ledger'] = JSON.stringify({ spent, bonus });
+  }
+
+  if (out['sampire-lifetime-counters'] != null) {
+    const c = parseJsonSafe(out['sampire-lifetime-counters'], {});
+    const clampCount = (v) => Math.min(100000000, Math.max(0, Math.floor(Number(v) || 0)));
+    out['sampire-lifetime-counters'] = JSON.stringify({ daysPlayed: clampCount(c && c.daysPlayed), perfectRuns: clampCount(c && c.perfectRuns), countedRuns: clampCount(c && c.countedRuns) });
+  }
+
+  if (out['sampire-title'] != null) {
+    const t = parseJsonSafe(out['sampire-title'], {});
+    const str = (v) => String(v == null ? '' : v).slice(0, 64);
+    out['sampire-title'] = JSON.stringify({ title: str(t && t.title), nameColor: str(t && t.nameColor), caretColor: str(t && t.caretColor), trailColor: str(t && t.trailColor), nameColorValue: str(t && t.nameColorValue) });
+  }
+
+  // The recap marker is a plain week key, not JSON.
+  if (out['sampire-weekly-recap-seen'] != null && !/^\d{4}-\d{2}-\d{2}$/.test(String(out['sampire-weekly-recap-seen']).trim())) {
+    delete out['sampire-weekly-recap-seen'];
+    notes.push('dropped invalid sampire-weekly-recap-seen');
   }
 
   if (out['sampire-typing-history'] != null) {
@@ -166,7 +200,11 @@ export function sanitizeProgress(input, options = {}) {
     for (const [id, on] of Object.entries(s && s.keySoundPacks && typeof s.keySoundPacks === 'object' ? s.keySoundPacks : {})) {
       packs[String(id).slice(0, 64)] = !!on;
     }
-    out['sampire-skills'] = JSON.stringify({ aura: !!(s && s.aura), soundscapes: !!(s && s.soundscapes), nebulaTrail: !!(s && s.nebulaTrail), keySoundPacks: packs });
+    const cosmetics = {};
+    for (const [id, on] of Object.entries(s && s.cosmetics && typeof s.cosmetics === 'object' ? s.cosmetics : {})) {
+      cosmetics[String(id).slice(0, 64)] = !!on;
+    }
+    out['sampire-skills'] = JSON.stringify({ aura: !!(s && s.aura), soundscapes: !!(s && s.soundscapes), nebulaTrail: !!(s && s.nebulaTrail), keySoundPacks: packs, cosmetics });
   }
 
   return { progress: out, notes };

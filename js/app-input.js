@@ -460,11 +460,13 @@ function updateLastPointerPositionFromEvent(event) {
 document.addEventListener('pointermove', updateLastPointerPositionFromEvent, { passive: true });
 
 // ── Theme Soundtracks ────────────────────────────────────────────────────────
+// Created without a source: new Audio(src) starts downloading at once, before any gesture.
+// js/app-audio.js (deferMediaUntilPlay) attaches the source the first time play() is called.
 const themeMusic = {
-    dark: new Audio('Sound Effects/Dark Main Theme.mp3'),
-    universe: new Audio('Sound Effects/Your Own Personal Universe.mp3'),
+    dark: new Audio(),
+    universe: new Audio(),
 };
-const soundscapePreviewAudio = new Audio('Sound Effects/Your Own Personal Universe.mp3');
+const soundscapePreviewAudio = new Audio();
 const MUSIC_VOLUME_KEY = 'sampire-music-volume';
 const KEY_SOUND_VOLUME_KEY = 'sampire-key-sound-volume';
 const DEFAULT_MUSIC_VOLUME = 0.25;

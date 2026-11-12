@@ -11,12 +11,26 @@ export const MAX_LEVEL = 100;
 export const KNOWN_MODES = ['quotes', 'words', 'words30', 'words15', 'words60', 'words120'];
 export const TIMED_MODE_SECONDS = { words30: 30, words15: 15, words60: 60, words120: 120 };
 
+// Badge ids must match BADGE_DEFS in js/app-progression.js. The tiered ids come first so an admin
+// "set achievements to N" hands out the low tiers first. The trailing legacy ids are kept so old
+// saves are not stripped before the client migrates them (LEGACY_BADGE_IDS in app-progression.js).
 export const BADGE_IDS = [
-  'sonic_boom', 'speed_demon', 'flawless', 'midnight_oil', 'streak_master', 'triple_crown',
-  'founder', 'human_lectionary', 'marathon', 'consistent_climber', 'above_average', 'aura', 'soundscapes',
+  'runs_50', 'runs_250', 'runs_1000',
+  'words_10k', 'words_50k', 'words_250k',
+  'days_7', 'days_30', 'days_100',
+  'quests_10', 'quests_50', 'quests_200',
+  'perfect_10', 'perfect_50',
+  'speed_60', 'speed_80', 'speed_100', 'speed_120',
+  'triple_crown', 'fleet_defender', 'founder', 'human_lectionary',
+  // legacy ids from the old badge scheme
+  'sonic_boom', 'speed_demon', 'flawless', 'midnight_oil', 'streak_master', 'marathon', 'consistent_climber', 'above_average', 'aura', 'soundscapes',
 ];
-export const DAILY_IDS = ['nobackspace', 'sprint', 'perfectionist', 'daily_quotes_5', 'daily_words_5', 'daily_words30_5'];
-export const WEEKLY_IDS = ['marathon', 'consistent_climber', 'rival_week', 'above_average'];
+// Quest ids must match DAILY_QUEST_POOL and WEEKLY_QUESTS in js/app-progression.js (old ids kept at the end).
+export const DAILY_IDS = [
+  'runs_5', 'daily_quotes_5', 'words_500', 'acc_96', 'drills_3', 'nobackspace', 'beat_avg', 'beat_yesterday',
+  'sprint', 'perfectionist', 'daily_words_5', 'daily_words30_5',
+];
+export const WEEKLY_IDS = ['marathon', 'days_5', 'beat_last_week', 'runs95_10', 'above_average', 'consistent_climber', 'rival_week'];
 
 export class HttpError extends Error {
   constructor(status, message, code = '') {
@@ -454,6 +468,7 @@ export function compactScoreRow(row) {
     mode: String(row.mode || 'quotes'),
     date: Number(row.date) || 0,
     level: Math.max(1, Math.floor(Number(row.level) || 1)),
+    title: String(row.title || '').slice(0, 24),
     flagged: !!row.flagged,
   };
 }

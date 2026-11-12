@@ -4,11 +4,19 @@
 // browser supports sharing files. Otherwise it downloads the PNG and copies a short
 // text summary plus a link to the clipboard. Opening that link (?r=...) shows a
 // "can you beat it?" banner that starts the same mode.
+// A challenge link (?c=...) goes further: it carries the test seed, mode and text options,
+// so a friend gets the exact same text, and a win/lose banner after their run.
 (function () {
     const CARD_W = 1200;
     const CARD_H = 630;
     const MODE_LABELS = { quotes: 'Quotes', words: 'Random Words', words30: 'Timed 30s', adaptive: 'Weak keys', community: 'Team goal' };
     const SHARE_MODES = ['quotes', 'words', 'words30', 'adaptive'];
+    // Modes whose text can be rebuilt from a seed. Weak keys, Story and Team goal cannot.
+    const CHALLENGE_MODES = ['quotes', 'words', 'words30'];
+    const CHALLENGE_TEXT_OPTIONS = ['time', 'words', 'punctuation', 'numbers', 'wordList'];
+    const CHALLENGE_OPTION_CHOICES = { time: [15, 30, 60, 120], words: [10, 25, 50, 100], wordList: ['common', 'wide'] };
+    let lastRunChallengeSpec = null; // { seed, mode, options } of the run shown on the results card
+    let activeChallenge = null;      // decoded ?c= payload the player accepted with "Try it"
     // Nunito when the page has loaded it, otherwise a rounded system font.
     const FONT = "'Nunito', 'Ubuntu', 'Segoe UI', system-ui, -apple-system, Roboto, sans-serif";
     const NAVY = '#0b1430';
@@ -411,7 +419,8 @@
         return downloaded ? 'downloaded' : (copied ? 'copied' : 'failed');
     }
 
-    async function share(summary) {
+    // `challengeSpec` (optional) makes the shared link a challenge link, so the reader gets the same text.
+    async function share(summary, { challengeSpec = null } = {}) {
         const s = normalizeSummary(summary);
         if (s.wpm <= 0) {
             toast('Finish a run first, then share it.', 'info');
@@ -424,11 +433,12 @@
             toast('The card could not be drawn in this browser.', 'error');
             return 'failed';
         }
+        const spec = normalizeChallengeSpec(challengeSpec);
         return shareBlob(blob, {
             filename: `typemine-${s.wpm}wpm.png`,
             title: 'My TypeMine Galactic result',
-            text: buildShareText(s),
-            link: buildShareLink(s),
+            text: spec ? buildChallengeText(s) : buildShareText(s),
+            link: spec ? buildChallengeLink(s, spec) : buildShareLink(s),
         });
     }
 
@@ -464,12 +474,196 @@
         };
     }
 
-    function shareLastRun() {
-        const summary = (window.lastRunSummary && Number(window.lastRunSummary.wpm) > 0)
+    function lastRunSummaryOrOverlay() {
+        return (window.lastRunSummary && Number(window.lastRunSummary.wpm) > 0)
             ? window.lastRunSummary
             : summaryFromResultsOverlay();
-        return share(summary);
     }
+
+    function shareLastRun() {
+        return share(lastRunSummaryOrOverlay(), { challengeSpec: lastRunChallengeSpec });
+    }
+
+    // ── Challenge a friend ──────────────────────────────────────────────────
+    function pickTextOptions(options) {
+        const src = options && typeof options === 'object' ? options : {};
+        const out = {};
+        for (const name of CHALLENGE_TEXT_OPTIONS) {
+            if (!(name in src)) continue;
+            const v = src[name];
+            if (name === 'punctuation' || name === 'numbers') out[name] = v === true || v === 'true' || v === 1 || v === '1';
+            else if (name === 'wordList') { if (CHALLENGE_OPTION_CHOICES.wordList.includes(v)) out[name] = v; }
+            else { const n = Number(v); if (CHALLENGE_OPTION_CHOICES[name].includes(n)) out[name] = n; }
+        }
+        return out;
+    }
+
+    function normalizeChallengeSpec(spec) {
+        if (!spec || typeof spec !== 'object') return null;
+        const seed = Number(spec.seed);
+        if (!Number.isInteger(seed) || seed < 0 || seed > 0xFFFFFFFF) return null;
+        const mode = String(spec.mode || '');
+        if (!CHALLENGE_MODES.includes(mode)) return null;
+        return { seed, mode, options: pickTextOptions(spec.options) };
+    }
+
+    // Remembers the seed of the run that just finished so the results card can offer a challenge link.
+    function captureChallengeSpec(summary) {
+        lastRunChallengeSpec = null;
+        if (typeof window.getCurrentTestSpec !== 'function') return;
+        if (!summary || summary.counted === false || !(Number(summary.wpm) > 0)) return;
+        try {
+            const spec = window.getCurrentTestSpec();
+            const mode = String(summary.mode || '');
+            if (!spec || mode !== String(spec.mode || '') || !CHALLENGE_MODES.includes(mode)) return;
+            // Text that is not rebuilt from the seed alone: challenge quests, Bible quotes, weak-key passages.
+            if (typeof activeChallengeId !== 'undefined' && activeChallengeId) return;
+            if (mode === 'quotes' && typeof bibleModeEnabled !== 'undefined' && bibleModeEnabled) return;
+            if (mode === 'quotes' && typeof activeCommunityBoostMode !== 'undefined' && activeCommunityBoostMode === 'targeted_weakness') return;
+            lastRunChallengeSpec = normalizeChallengeSpec({ seed: Number(spec.seed) >>> 0, mode, options: spec.options });
+        } catch (e) {
+            lastRunChallengeSpec = null;
+        }
+    }
+
+    function decodeChallengeParam(raw) {
+        try {
+            let b64 = String(raw || '').replace(/-/g, '+').replace(/_/g, '/');
+            while (b64.length % 4) b64 += '=';
+            const obj = JSON.parse(decodeURIComponent(escape(atob(b64))));
+            const spec = normalizeChallengeSpec(obj);
+            if (!spec) return null;
+            const wpm = Math.round(clampNumber(obj.wpm, 0, 400, NaN));
+            if (!Number.isFinite(wpm) || wpm <= 0) return null;
+            return {
+                seed: spec.seed,
+                mode: spec.mode,
+                options: spec.options,
+                wpm,
+                accuracy: Math.round(clampNumber(obj.accuracy, 0, 100)),
+                name: cleanName(obj.name),
+            };
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function buildChallengeLink(summary, spec) {
+        const clean = normalizeChallengeSpec(spec);
+        if (!clean) return '';
+        const s = normalizeSummary(summary);
+        const payload = { seed: clean.seed, mode: clean.mode, options: clean.options, wpm: s.wpm, accuracy: s.accuracy, name: s.name };
+        return `${location.origin}${location.pathname}?c=${encodeShareParam(payload)}`;
+    }
+
+    function buildChallengeText(summary) {
+        const s = normalizeSummary(summary);
+        return `${s.name} typed ${s.wpm} WPM at ${s.accuracy}% accuracy on this exact text in ${s.modeLabel}. Beat it?`;
+    }
+
+    // "Challenge a friend" on the results card: copies a link that reproduces this run's text.
+    async function challengeLastRun() {
+        const summary = lastRunSummaryOrOverlay();
+        if (!lastRunChallengeSpec || !(Number(summary.wpm) > 0)) {
+            toast('Challenge links work for Quotes, Random Words and Timed runs. Finish one of those first.', 'info');
+            return '';
+        }
+        const link = buildChallengeLink(summary, lastRunChallengeSpec);
+        const ok = await copyText(`${buildChallengeText(summary)} ${link}`);
+        toast(ok ? 'Challenge link copied. Send it to a friend and they get this exact text.' : `Copy this link: ${link}`, ok ? 'success' : 'info');
+        return link;
+    }
+
+    function startChallengeTest(data) {
+        if (!data || typeof newTest !== 'function') return false;
+        try {
+            const splash = document.getElementById('entry-splash');
+            if (splash && !splash.classList.contains('hidden') && typeof hideSplashScreen === 'function') hideSplashScreen();
+            const outcome = document.getElementById('challenge-outcome');
+            if (outcome) { outcome.hidden = true; outcome.innerHTML = ''; }
+            newTest({ seed: data.seed, mode: data.mode, options: data.options });
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function acceptChallenge(data) {
+        activeChallenge = data;
+        startChallengeTest(data);
+    }
+
+    function rematchChallenge() {
+        if (!activeChallenge) return;
+        startChallengeTest(activeChallenge);
+    }
+
+    function endChallenge() {
+        activeChallenge = null;
+        const outcome = document.getElementById('challenge-outcome');
+        if (outcome) { outcome.hidden = true; outcome.innerHTML = ''; }
+    }
+
+    // Win/lose banner on the results card after a challenge run (same seed and mode as the link).
+    function renderChallengeOutcome(summary) {
+        const el = document.getElementById('challenge-outcome');
+        if (!el) return;
+        let spec = null;
+        try { spec = typeof window.getCurrentTestSpec === 'function' ? window.getCurrentTestSpec() : null; } catch (e) { spec = null; }
+        const matches = !!(activeChallenge && spec
+            && (Number(spec.seed) >>> 0) === activeChallenge.seed
+            && String(spec.mode || '') === activeChallenge.mode);
+        if (!matches) {
+            el.hidden = true;
+            el.innerHTML = '';
+            return;
+        }
+        const wpm = Math.round(Number(summary && summary.wpm) || 0);
+        const theirs = activeChallenge.wpm;
+        const name = activeChallenge.name;
+        const won = wpm > theirs;
+        const text = won
+            ? `You beat ${name}: ${wpm} vs ${theirs} WPM!`
+            : `${name} still leads, ${theirs} vs ${wpm}. Try again?`;
+        el.className = `challenge-outcome ${won ? 'win' : 'lose'}`;
+        el.innerHTML = `<span class="challenge-outcome-text">${esc(text)}</span>`
+            + `<span class="challenge-outcome-actions">`
+            + `<button type="button" class="secondary challenge-rematch-btn" onclick="rematchChallenge()">Rematch</button>`
+            + (won ? `<button type="button" class="secondary challenge-return-btn" onclick="challengeLastRun()">Send it back</button>` : '')
+            + `<button type="button" class="secondary challenge-done-btn" onclick="endChallenge()">Done</button>`
+            + `</span>`;
+        el.hidden = false;
+    }
+
+    function checkChallengeParam() {
+        let raw = '';
+        try { raw = String(new URLSearchParams(location.search).get('c') || ''); } catch (e) { return; }
+        if (!raw) return;
+        const data = decodeChallengeParam(raw);
+        if (!data) {
+            removeParam('c');
+            return;
+        }
+        const text = `${data.name} typed ${data.wpm} WPM on this exact text. Beat it?`;
+        if (typeof showSocialBanner === 'function') {
+            showSocialBanner({
+                id: 'challenge-banner',
+                text,
+                actions: [
+                    { label: 'Try it', primary: true, onClick: () => { acceptChallenge(data); removeParam('c'); } },
+                    { label: 'Not now', onClick: () => removeParam('c') },
+                ],
+            });
+        } else {
+            toast(text, 'info');
+        }
+    }
+
+    document.addEventListener('typemine:run-finished', (event) => {
+        const summary = (event && event.detail) || window.lastRunSummary;
+        try { captureChallengeSpec(summary); } catch (e) {}
+        try { renderChallengeOutcome(summary); } catch (e) {}
+    });
 
     function startModeFromShare(mode) {
         if (typeof setMode !== 'function') return;
@@ -527,10 +721,23 @@
         encodeShareParam,
         drawResultCard,
         drawRecapCard,
+        // challenge links
+        CHALLENGE_MODES,
+        encodeChallengeParam: encodeShareParam,
+        decodeChallengeParam,
+        buildChallengeLink,
+        buildChallengeText,
+        getLastRunChallengeSpec: () => (lastRunChallengeSpec ? { ...lastRunChallengeSpec, options: { ...lastRunChallengeSpec.options } } : null),
+        getActiveChallenge: () => (activeChallenge ? { ...activeChallenge } : null),
+        acceptChallenge,
     };
     window.shareLastRun = shareLastRun;
+    window.challengeLastRun = challengeLastRun;
+    window.rematchChallenge = rematchChallenge;
+    window.endChallenge = endChallenge;
 
     window.addEventListener('DOMContentLoaded', () => {
+        try { checkChallengeParam(); } catch (e) {}
         try { checkSharedResultParam(); } catch (e) {}
     });
 })();

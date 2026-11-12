@@ -235,6 +235,7 @@ async function main() {
         assert.strictEqual(all.status, 200);
         assert.deepStrictEqual(all.data.rows.map((r) => r.username), ['bob', 'carol', 'alice']);
         assert.ok(all.data.rows.every((r) => typeof r.level === 'number' && r.userId));
+        assert.ok(all.data.rows.every((r) => typeof r.title === 'string' && r.title.length <= 24), 'rows carry the equipped title (empty when none)');
         assert.deepStrictEqual(all.data.yourRank, { rank: 3, wpm: 60, total: 3 });
         assert.strictEqual(all.data.rows.find((r) => r.username === 'alice').wpm, 60, 'flagged 250 is not on the board');
         const weekly = await alice.get('/api/leaderboard?tab=weekly');
@@ -379,6 +380,53 @@ async function main() {
         assert.strictEqual(bad.status, 400);
     });
 
+    await test('progress: wave-2 keys, tiered badge ids and new quest ids round-trip unchanged', async () => {
+        const before = await alice.get('/api/progress');
+        // Values are written in the exact shape the server normalises to, so the strings must come back byte-for-byte.
+        const snapshot = {
+            'sampire-badges': JSON.stringify([
+                { id: 'runs_50', earnedAt: 1700000000000 }, { id: 'words_10k', earnedAt: 1700000000001 }, { id: 'days_7', earnedAt: 1700000000002 },
+                { id: 'quests_10', earnedAt: 1700000000003 }, { id: 'perfect_10', earnedAt: 1700000000004 }, { id: 'speed_60', earnedAt: 1700000000005 },
+                { id: 'speed_120', earnedAt: 1700000000006 }, { id: 'triple_crown', earnedAt: 1700000000007 }, { id: 'fleet_defender', earnedAt: 1700000000008 },
+                { id: 'founder', earnedAt: 1700000000009 }, { id: 'human_lectionary', earnedAt: 1700000000010 },
+            ]),
+            'sampire-streak': JSON.stringify({ lastPlayDate: '2026-11-10', streak: 4, freezes: 1 }),
+            'sampire-daily-v2': JSON.stringify({ days: { '2026-11-10': ['runs_5', 'acc_96', 'beat_yesterday', 'drills_3'] } }),
+            'sampire-weekly': JSON.stringify({ week: '2026-11-08', completions: ['days_5', 'runs95_10', 'beat_last_week'] }),
+            'sampire-skills': JSON.stringify({ aura: true, soundscapes: false, nebulaTrail: true, keySoundPacks: { typewriter: true }, cosmetics: { name_sky: true, caret_orange: false } }),
+            'sampire-crystal-ledger': JSON.stringify({ spent: 4, bonus: 2 }),
+            'sampire-lifetime-counters': JSON.stringify({ daysPlayed: 9, perfectRuns: 2, countedRuns: 57 }),
+            'sampire-title': JSON.stringify({ title: 'Rookie', nameColor: 'name_sky', caretColor: '', trailColor: '', nameColorValue: '#5ac8fa' }),
+            'sampire-daily-stats': JSON.stringify({ days: { '2026-11-10': { runs: 3, words: 120, sumWpm: 150, bestWpm: 60, bestAcc: 98, runs96: 1, perfect: 0, modes: { words: 3 } } } }),
+            'sampire-weekly-recap-seen': '2026-11-01',
+            'sampire-coach': JSON.stringify({ placementWpm: 38, placementAccuracy: 94, goalWpm: 50, goalDate: '2026-12-01', step: 3, fingerMapSeen: true, dailyGoalWpm: 40 }),
+        };
+        const put = await alice.put('/api/progress', { baseUpdatedAt: before.data.updatedAt, progress: snapshot });
+        assert.strictEqual(put.status, 200, JSON.stringify(put.data));
+        assert.strictEqual(put.data.clamped, undefined, `nothing should be clamped or dropped: ${JSON.stringify(put.data.clamped)}`);
+        const got = await alice.get('/api/progress');
+        for (const [key, value] of Object.entries(snapshot)) {
+            assert.strictEqual(got.data.progress[key], value, `${key} should round-trip unchanged`);
+        }
+    });
+
+    await test('admin crystal grants are written to the ledger bonus, badge grants use the tiered ids', async () => {
+        const r = await boss.patch(`/api/admin/users/${bobId}`, { addSkillPoints: 3, setAchievements: 2, setStreakDays: 5 });
+        assert.strictEqual(r.status, 200, JSON.stringify(r.data));
+        const bobClient = client('203.0.113.23');
+        await bobClient.post('/api/login', { username: 'bob', password: 'secret123' });
+        const progress = (await bobClient.get('/api/progress')).data.progress;
+        assert.deepStrictEqual(JSON.parse(progress['sampire-crystal-ledger']), { spent: 0, bonus: 3 });
+        assert.strictEqual(progress['sampire-skill-points'], '3', 'the cached balance follows the grant');
+        assert.deepStrictEqual(JSON.parse(progress['sampire-badges']).map((b) => b.id), ['runs_50', 'runs_250']);
+        assert.deepStrictEqual(JSON.parse(progress['sampire-streak']), { lastPlayDate: JSON.parse(progress['sampire-streak']).lastPlayDate, streak: 5, freezes: 0 });
+        const r2 = await boss.patch(`/api/admin/users/${bobId}`, { setSkillPoints: 10 });
+        assert.strictEqual(r2.status, 200);
+        const progress2 = (await bobClient.get('/api/progress')).data.progress;
+        assert.deepStrictEqual(JSON.parse(progress2['sampire-crystal-ledger']), { spent: 0, bonus: 10 }, 'set assigns: bonus moves by the difference from the cached balance');
+        assert.strictEqual(progress2['sampire-skill-points'], '10');
+    });
+
     await test('rename propagates to boards, community row and user summary', async () => {
         const r = await alice.patch('/api/account', { username: 'alice2' });
         assert.strictEqual(r.status, 200);
@@ -411,6 +459,16 @@ async function main() {
         assert.strictEqual(summary.status, 404);
         const me = await carol.get('/api/me');
         assert.strictEqual(me.status, 401);
+    });
+
+    await test('a 10-word run finished in under 10 seconds is accepted; a 9-word run is not', async () => {
+        // A 10-word test typed at about 70 WPM takes about 8.5 seconds. The client counts it, so the server must too.
+        const c = client('203.0.113.23');
+        await c.post('/api/login', { username: 'bob', password: 'secret123' });
+        const ok = await c.post('/api/scores', goodRun(70, { mode: 'words', time: 8.5, typedChars: 50, typedWords: 10, rawWpm: 71, keystrokes: 50 }));
+        assert.strictEqual(ok.status, 200, JSON.stringify(ok.data));
+        const nine = await c.post('/api/scores', goodRun(70, { mode: 'words', time: 7.7, typedChars: 45, typedWords: 9, rawWpm: 71, keystrokes: 45 }));
+        assert.strictEqual(nine.status, 400);
     });
 
     await test('per-user score rate limit kicks in after 60 submissions in 10 minutes', async () => {

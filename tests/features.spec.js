@@ -113,7 +113,8 @@ test.describe('Features (desktop)', () => {
     const enabled = await page.evaluate(() => ghostCursorEnabled);
     test.skip(!enabled, 'ghost cursor disabled by default in this build');
     await completeRun(page);
-    await page.evaluate(() => closeResults());
+    await page.evaluate(() => { closeResults(); if (typeof closeLevelUpOverlay === 'function') closeLevelUpOverlay(); });
+    await expect(page.locator('#levelup-overlay')).not.toHaveClass(/show/);
     await page.keyboard.press('Tab'); // restart: new Random Words test with ghost from previous run
     await expect(overlay(page)).not.toHaveClass(/show/);
     await focusTyping(page);

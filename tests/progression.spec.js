@@ -78,7 +78,9 @@ test.describe('Progression', () => {
   });
 
   test('a run under 50% accuracy is not counted: no XP, no history, card says so', async ({ page }) => {
-    await start(page);
+    test.slow(); // two full runs; needs headroom under parallel load
+    // Ten words is enough to meet the "10 correct words" rule while keeping the slow typing loop short.
+    await start(page, () => localStorage.setItem('sampire-engine-options', JSON.stringify({ words: 10 })));
     const xpBefore = await page.evaluate(() => getTotalXP());
     await page.locator('#quote-display').click();
     const text = await readTarget(page);
@@ -133,6 +135,7 @@ test.describe('Progression', () => {
   });
 
   test('finishing a quest shows it in the rewards list and the weekly counter updates', async ({ page }) => {
+    test.slow(); // full counted run plus quest bookkeeping; needs headroom under parallel load
     const today = dateKeyDaysAgo(0);
     await start(page, () => {});
     // One run away from every "volume" quest, whichever one today picked.
@@ -167,6 +170,7 @@ test.describe('Progression', () => {
     expect(weekly.daysPlayed).toEqual([today]);
     // Today's goals on the card sit below the score and show the finished quest.
     await expect(page.locator('#result-goals .goal-row.done')).toHaveCount(await page.evaluate(() => getDailyCompletions().length));
+    await expect(page.locator('#final-wpm')).toBeVisible();
     const scoreTop = (await page.locator('#final-wpm').boundingBox()).y;
     const goalsTop = (await page.locator('#result-goals').boundingBox()).y;
     expect(goalsTop).toBeGreaterThan(scoreTop);

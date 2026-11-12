@@ -1225,12 +1225,9 @@ function focusInput() {
         hiddenInput.focus();
     }
     quoteDisplay.classList.add('focused');
-    // On touch devices, scroll the quote display into view after keyboard opens
-    if (isTouchDevice()) {
-        setTimeout(() => {
-            quoteDisplay.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }, 300);
-    }
+    // On touch devices the on-screen keyboard path in app-input.js scrolls the
+    // text into view once the keyboard is really open (body.vk-open). Scrolling
+    // here unconditionally pushed the logo and tabs under the fixed top bar.
 }
 
 function shouldUseCompactTypingViewport() {
@@ -1263,7 +1260,8 @@ window.addEventListener('resize', () => {
     engineFrame.scroll = true;
     engineFrame.laser = true;
     scheduleEngineFrame();
-    if (isLyraGateOpen()) updateLyraShipAim();
+    // app-lyra.js loads after this file; a resize can fire before it does (seen on mobile emulation).
+    if (typeof isLyraGateOpen === 'function' && isLyraGateOpen()) updateLyraShipAim();
 });
 if (document.fonts && document.fonts.ready) {
     document.fonts.ready.then(() => { engineFrame.caret = true; engineFrame.pace = true; scheduleEngineFrame(); }).catch(() => {});
@@ -2584,6 +2582,14 @@ const SYNC_PROGRESS_KEYS = [
     'sampire-mining-state-v1',
     'sampire-weekly-words',
     'sampire-friends-cache',
+    // Wave 2 progression keys (day log, lifetime counters, crystal ledger, equipped title/colours, recap marker)
+    'sampire-daily-stats',
+    'sampire-lifetime-counters',
+    'sampire-crystal-ledger',
+    'sampire-title',
+    'sampire-weekly-recap-seen',
+    // Coach state (js/coach.js): { placementWpm, placementAccuracy, goalWpm, goalDate, step, fingerMapSeen, dailyGoalWpm }
+    'sampire-coach',
 ];
 const CRITICAL_STORAGE_KEYS = [
     LOCAL_AUTH_TOKEN_KEY,

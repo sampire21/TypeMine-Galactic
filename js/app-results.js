@@ -2,7 +2,7 @@
 // One accessor for the finished run's numbers (uses window.getRunStats() from the engine
 // when it exists), the counted-run rule, rewards, and the results card.
 
-const RESULT_MODE_LABELS = { quotes: 'Quotes', words: 'Random words', words30: 'Words 30s', adaptive: 'Weak-key drill', community: 'Bonus round', daily: 'Challenge' };
+const RESULT_MODE_LABELS = { quotes: 'Quotes', words: 'Random words', words30: 'Timed', adaptive: 'Weak-key drill', community: 'Bonus round', daily: 'Challenge' };
 let lastResultSlowKeys = [];
 let lastResultCtaAction = null;
 

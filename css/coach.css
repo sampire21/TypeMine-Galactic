@@ -1,0 +1,118 @@
+/* css/coach.css: the Coach (first-run flow, goal chip, weekly lesson, result tip, close-out card).
+   Tokens, .btn, .panel and .modal-shell come from styles.css. Loaded after css/ui.css. */
+
+/* ── Modal: sits above the results screen so a card can follow a run ── */
+.coach-modal { z-index: calc(var(--z-results, 700) + 20); overflow-y: auto; align-items: flex-start; }
+.coach-card {
+    width: min(560px, 100%);
+    margin-top: clamp(0.5rem, 6vh, 3.5rem);
+    padding: 1.1rem 1.25rem 1.35rem;
+    background: var(--surface-solid-2, #0e2246);
+    color: var(--text);
+    transform-origin: 50% 40%;
+    animation: coach-pop var(--dur-slow, 420ms) var(--ease-spring) both;
+}
+.coach-modal.coach-wide .coach-card { width: min(860px, 100%); }
+@keyframes coach-pop { from { opacity: 0; transform: scale(0.86); } to { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .coach-card { animation: none; } }
+
+.coach-body { font-size: var(--fs-m); line-height: 1.5; }
+.coach-body p { margin: 0 0 0.75rem; }
+.coach-lead { font-size: var(--fs-l); font-weight: 600; }
+.coach-big { font-size: var(--fs-2xl); font-weight: 800; letter-spacing: 0.01em; color: var(--accent-warm); margin-bottom: 0.4rem; }
+.coach-muted { color: var(--text-muted); font-size: var(--fs-s); }
+.coach-list { margin: 0 0 0.75rem; padding-left: 1.2rem; display: grid; gap: 0.55rem; }
+.coach-list li::marker { color: var(--accent); }
+.coach-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1rem; }
+.coach-actions .btn { flex: 1 1 auto; }
+.coach-actions .btn-primary { flex-basis: 100%; }
+@media (min-width: 560px) { .coach-actions .btn-primary { flex-basis: auto; } }
+
+/* ── Finger map ── */
+.coach-finger-map { margin: 0.2rem 0 0.9rem; padding: 0.6rem; border-radius: var(--radius-m); background: rgba(5, 11, 28, 0.45); border: 1px solid var(--border-soft); }
+.coach-finger-map svg { display: block; width: 100%; height: auto; }
+.coach-finger-map .key.is-focus { stroke: #ffffff; stroke-opacity: 1; stroke-width: 6; filter: drop-shadow(0 0 10px #ffffff); }
+/* Fallback rows if the SVG cannot be fetched (offline before the first cache). */
+.coach-keyrows { display: grid; gap: 0.35rem; justify-items: center; }
+.coach-keyrow { display: flex; gap: 0.3rem; }
+.coach-keyrow-home { padding-left: 0.8rem; }
+.coach-keycap { width: 2rem; height: 2rem; display: inline-grid; place-items: center; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--border-soft); font-weight: 800; text-transform: uppercase; }
+.coach-keyrow-home .coach-keycap { border-color: var(--text); }
+
+/* ── Hint line under the text during a drill ── */
+.coach-finger-hint {
+    margin: 0 auto 0.6rem;
+    max-width: 48rem;
+    padding: 0.45rem 0.9rem;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--border-soft);
+    background: linear-gradient(180deg, rgba(63, 217, 236, 0.14), rgba(16, 40, 80, 0.85));
+    color: var(--text);
+    font-size: var(--fs-s);
+    text-align: center;
+    line-height: 1.45;
+}
+.coach-finger-hint[hidden] { display: none; }
+.coach-hint-step { color: var(--text-muted); font-weight: 700; }
+.coach-hint-key { color: var(--accent-warm); font-weight: 800; }
+
+/* ── Goal chip in the goals strip ── */
+.coach-goal-chip {
+    flex: 1 1 100%;
+    min-height: 32px;
+    margin-top: 0.35rem;
+    padding: 0.35rem 0.85rem;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--border-soft);
+    background: linear-gradient(180deg, rgba(63, 217, 236, 0.12), rgba(16, 40, 80, 0.85));
+    color: var(--text);
+    font: inherit;
+    font-size: var(--fs-s);
+    font-weight: 700;
+    text-align: left;
+    cursor: pointer;
+    transition: transform var(--dur-fast) var(--ease-spring), border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.coach-goal-chip:hover, .coach-goal-chip:focus-visible { transform: scale(1.02); border-color: var(--accent); box-shadow: 0 0 12px var(--glow); outline: none; }
+.coach-goal-chip::before { content: ''; display: inline-block; width: 9px; height: 9px; margin-right: 0.5rem; border-radius: 50%; background: var(--text-muted); box-shadow: 0 0 6px currentColor; vertical-align: 1px; }
+.coach-goal-chip[data-status="ontrack"]::before, .coach-goal-chip[data-status="reached"]::before { background: var(--success); color: var(--success); }
+.coach-goal-chip[data-status="behind"]::before, .coach-goal-chip[data-status="past"]::before { background: var(--accent-warm); color: var(--accent-warm); }
+.coach-goal-chip[data-status="none"] { color: var(--text-muted); }
+
+/* ── Lesson card on the Challenges tab ── */
+.coach-lesson-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.9rem;
+    flex-wrap: wrap;
+    margin: 0 0 0.9rem;
+    padding: 0.85rem 1rem;
+    border-radius: var(--radius-m);
+}
+.coach-lesson-title { font-weight: 800; font-size: var(--fs-m); }
+.coach-lesson-xp { margin-left: 0.4rem; color: var(--xp); font-size: var(--fs-xs); font-weight: 800; }
+.coach-lesson-desc { color: var(--text-muted); font-size: var(--fs-s); margin-top: 0.2rem; }
+.coach-lesson-right { display: flex; align-items: center; gap: 0.6rem; }
+.coach-lesson-done { color: var(--success); font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; }
+
+/* ── Tip on the results card ── */
+.coach-result-tip {
+    margin: 0 0 0.8rem;
+    padding: 0.55rem 0.8rem;
+    border-radius: var(--radius-s);
+    border: 1px solid rgba(255, 179, 71, 0.5);
+    background: rgba(255, 179, 71, 0.08);
+    color: var(--text);
+    font-size: var(--fs-s);
+    line-height: 1.45;
+}
+.coach-tip-label { display: inline-block; margin-right: 0.35rem; color: var(--accent-warm); font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+
+/* ── Phones ── */
+@media (max-width: 600px) {
+    .coach-card { margin-top: 0.25rem; padding: 0.9rem 0.9rem 1.1rem; }
+    .coach-big { font-size: var(--fs-xl); }
+    .coach-lead { font-size: var(--fs-m); }
+    .coach-lesson-right { width: 100%; justify-content: flex-end; }
+}

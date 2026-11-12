@@ -127,9 +127,11 @@ export async function onRequestPatch(context) {
   const todayKey = clientDateKey || formatDateKeyUtc(new Date());
   const weekKeyForWrites = clientWeekKey || getWeekKeyUtc();
   if (setStreakDays !== null) {
+    const prevStreak = parseJsonSafe(progress['sampire-streak'] || '{}', {});
     progress['sampire-streak'] = JSON.stringify({
       lastPlayDate: todayKey,
       streak: setStreakDays,
+      freezes: Math.min(2, Math.max(0, Math.floor(Number(prevStreak && prevStreak.freezes) || 0))),
     });
   }
   if (setDailyCompleted !== null) {
@@ -153,12 +155,24 @@ export async function onRequestPatch(context) {
   }
 
   progress['sampire-xp'] = String(Math.min(XP_PER_LEVEL * MAX_LEVEL, Math.max(0, xp)));
+  // Crystals: the client derives the balance from levels + words + ledger.bonus - ledger.spent, so an
+  // admin grant goes into ledger.bonus. sampire-skill-points is only a cache of the last balance.
+  if (setSkillPoints !== null || addSkillPoints > 0) {
+    const ledger = parseJsonSafe(progress['sampire-crystal-ledger'] || '{}', {});
+    const spent = Math.max(0, Math.floor(Number(ledger && ledger.spent) || 0));
+    let bonus = Math.max(0, Math.floor(Number(ledger && ledger.bonus) || 0));
+    const cachedBefore = Math.max(0, parseInt(progress['sampire-skill-points'] || '0', 10) || 0);
+    if (setSkillPoints !== null) bonus = Math.max(0, bonus + (setSkillPoints - cachedBefore));
+    bonus += addSkillPoints;
+    progress['sampire-crystal-ledger'] = JSON.stringify({ spent, bonus });
+  }
   progress['sampire-skill-points'] = String(Math.max(0, sp));
   progress['sampire-skills'] = JSON.stringify({
     aura: !!skills.aura,
     soundscapes: !!skills.soundscapes,
     nebulaTrail: !!skills.nebulaTrail,
     keySoundPacks: skills.keySoundPacks && typeof skills.keySoundPacks === 'object' ? skills.keySoundPacks : {},
+    cosmetics: skills.cosmetics && typeof skills.cosmetics === 'object' ? skills.cosmetics : {},
   });
 
   let usernameChanged = false;

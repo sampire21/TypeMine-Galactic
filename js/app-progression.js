@@ -872,7 +872,7 @@ function completeEligibleQuests(multiplier = getXPMultiplier()) {
 function completePassiveDailyChallengesIfEligible() { return completeEligibleQuests().filter(x => !x.weekly); }
 function completePassiveWeeklyChallengesIfEligible() { return completeEligibleQuests().filter(x => x.weekly); }
 
-const MODE_RUN_LABELS = { quotes: 'Quotes', words: 'Random words', words30: 'Words 30s', adaptive: 'Weak keys' };
+const MODE_RUN_LABELS = { quotes: 'Quotes', words: 'Random words', words30: 'Timed', adaptive: 'Weak keys' };
 
 // The nearest unfinished quest, with the words for the results card button.
 function getNearestIncompleteQuest() {

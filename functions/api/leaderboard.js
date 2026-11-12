@@ -23,6 +23,7 @@ function publicRow(row) {
     mode: row.mode,
     date: row.date,
     level: row.level,
+    title: String(row.title || ''),
   };
 }
 

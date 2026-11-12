@@ -833,8 +833,8 @@ function runPersonalBestCelebration() {
 
 
 // ── Settings panel (gear button in the top bar) ─────────────────────────────
-const LIVE_CHART_KEY = 'sampire-live-chart';
-let liveChartEnabled = true;
+// The live chart preference lives in the engine options (sampire-engine-options, key liveChart,
+// js/app-core.js). The settings switch below only reads and writes that option.
 
 function isSettingsPanelOpen() {
     const panel = document.getElementById('settings-panel');
@@ -915,20 +915,23 @@ document.addEventListener('click', (e) => {
     try { playKeypressSound('Enter', null); } catch (err) {}
 }, { capture: true });
 
-function updateLiveChartToggleUI() {
-    const sw = document.getElementById('live-chart-toggle-btn');
-    if (sw) sw.setAttribute('aria-checked', liveChartEnabled ? 'true' : 'false');
-    document.body.classList.toggle('live-chart-hidden', !liveChartEnabled);
+function isLiveChartEnabled() {
+    return typeof getEngineOption === 'function' ? !!getEngineOption('liveChart') : true;
 }
 
+function updateLiveChartToggleUI() {
+    const sw = document.getElementById('live-chart-toggle-btn');
+    if (sw) sw.setAttribute('aria-checked', isLiveChartEnabled() ? 'true' : 'false');
+}
+
+// Kept for the boot sequence: the engine already loaded the option; this just refreshes the switch.
 function loadLiveChartPreference() {
-    try { liveChartEnabled = localStorage.getItem(LIVE_CHART_KEY) !== '0'; } catch (e) { liveChartEnabled = true; }
+    try { localStorage.removeItem('sampire-live-chart'); } catch (e) {}
     updateLiveChartToggleUI();
 }
 
 function toggleLiveChart() {
-    liveChartEnabled = !liveChartEnabled;
-    try { localStorage.setItem(LIVE_CHART_KEY, liveChartEnabled ? '1' : '0'); } catch (e) {}
+    if (typeof setEngineOption === 'function') setEngineOption('liveChart', !isLiveChartEnabled());
     updateLiveChartToggleUI();
 }
 
@@ -953,90 +956,10 @@ const COMMUNITY_FLEET_LEVELS = [
 const COMMUNITY_FLEET_TOTAL_HEALTH = COMMUNITY_FLEET_LEVELS.reduce((sum, level) => sum + level.health, 0);
 let rivalTargetRefreshInFlight = false;
 
-const CHALLENGES = [
-    {
-        id: 'nobackspace',
-        name: 'No Backspace',
-        desc: `Type a 100-word passage with at least ${NO_BACKSPACE_MIN_ACC}% accuracy. Backspace is disabled.`,
-        difficulty: 'Medium', diffClass: 'diff-medium',
-        xp: 100,
-    },
-    {
-        id: 'sprint',
-        name: 'The Sprint',
-        desc: '30-second burst — reach 100 WPM.',
-        difficulty: 'Hard', diffClass: 'diff-hard',
-        xp: 150,
-    },
-    {
-        id: 'perfectionist',
-        name: 'The Perfectionist',
-        desc: 'Complete a short quote (20–30 words) with zero mistakes. Any error fails immediately.',
-        difficulty: 'Expert', diffClass: 'diff-expert',
-        xp: 200,
-    },
-    {
-        id: 'daily_quotes_5',
-        name: 'The Chronicler',
-        desc: 'Complete 5 Quotes Tests.',
-        difficulty: 'Easy', diffClass: 'diff-easy',
-        xp: 50,
-        passive: true,
-        target: 5,
-        mode: 'quotes',
-    },
-    {
-        id: 'daily_words_5',
-        name: 'Neural Link Stabilizer',
-        desc: 'Complete 5 Random Words Tests.',
-        difficulty: 'Easy', diffClass: 'diff-easy',
-        xp: 50,
-        passive: true,
-        target: 5,
-        mode: 'words',
-    },
-    {
-        id: 'daily_words30_5',
-        name: 'The Quick-Draw',
-        desc: 'Complete 5 Words 30 Seconds Tests.',
-        difficulty: 'Easy', diffClass: 'diff-easy',
-        xp: 50,
-        passive: true,
-        target: 5,
-        mode: 'words30',
-    },
-];
-
-const WEEKLY_CHALLENGES = [
-    {
-        id: 'marathon',
-        name: 'The Marathon',
-        desc: 'Accumulate a total of 10,000 typed words over the course of the week.',
-        difficulty: 'Hard', diffClass: 'diff-hard',
-        xp: 250,
-    },
-    {
-        id: 'consistent_climber',
-        name: 'Consistent Climber',
-        desc: 'Maintain a WPM within 5% of your personal best for 10 consecutive tests.',
-        difficulty: 'Expert', diffClass: 'diff-expert',
-        xp: 300,
-    },
-    {
-        id: 'rival_week',
-        name: 'Rival Week',
-        desc: 'Beat the median community WPM score from the previous week.',
-        difficulty: 'Hard', diffClass: 'diff-hard',
-        xp: 300,
-    },
-    {
-        id: 'above_average',
-        name: 'Above Average',
-        desc: 'Score at least 5% above your average WPM in 5 tests this week.',
-        difficulty: 'Hard', diffClass: 'diff-hard',
-        xp: 250,
-    },
-];
+// Legacy quest arrays. They are kept only because older code reads them by name; app-progression.js
+// fills them in place at runtime (syncLegacyChallengeArrays) from DAILY_QUEST_POOL and WEEKLY_QUESTS.
+const CHALLENGES = [];
+const WEEKLY_CHALLENGES = [];
 
 let activeChallengeId   = null;
 let returnToDailyAfterResult = false;
