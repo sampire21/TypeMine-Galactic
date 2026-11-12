@@ -108,13 +108,17 @@
 
     function normAcc(a) { return typeof a !== 'number' || isNaN(a) ? null : (a > 1 ? a / 100 : a); }
 
+    // Letters that took longest to type (ties broken by accuracy). Letters with no timing are left out.
     function slowestLetters(keyData, n) {
-        return Object.keys(keyData).filter(function (c) { return /^[a-z]$/.test(c) && keyData[c].samples >= 2; })
+        return Object.keys(keyData).filter(function (c) {
+            var d = keyData[c];
+            return /^[a-z]$/.test(c) && d.samples >= 2 && typeof d.avgMs === 'number' && d.avgMs > 0;
+        })
             .map(function (c) {
                 var d = keyData[c], acc = normAcc(d.accuracy);
-                return { c: c, acc: acc == null ? 1 : acc, ms: d.avgMs || 0 };
+                return { c: c, acc: acc == null ? 1 : acc, ms: d.avgMs };
             })
-            .sort(function (a, b) { return (a.acc - b.acc) || (b.ms - a.ms); })
+            .sort(function (a, b) { return (b.ms - a.ms) || (a.acc - b.acc); })
             .filter(function (x, i) { return i < (n || 3); })
             .map(function (x) { return x.c; });
     }
@@ -181,6 +185,7 @@
             '.ra-row{display:flex;gap:4px}',
             '.ra-key{width:clamp(20px,6.5vw,32px);height:clamp(22px,7vw,32px);display:flex;align-items:center;justify-content:center;border-radius:6px;font:600 .78rem monospace;text-transform:uppercase;background:rgba(255,255,255,.07);color:#cfd8ee;border:1px solid rgba(255,255,255,.08)}',
             '.ra-empty{color:var(--lyra-terminal-muted,#a5b3d1);font-style:italic}',
+            '.ra-lifetime summary{cursor:pointer;list-style:none;margin-top:10px}.ra-lifetime summary::before{content:"\\25B8 ";}.ra-lifetime[open] summary::before{content:"\\25BE ";}',
             '.ra-ghost-badge{display:inline-block;padding:3px 10px;border-radius:999px;font:600 .85rem monospace;background:rgba(10,10,30,.7);border:1px solid currentColor;pointer-events:none}',
             '.ra-ghost-badge[hidden]{display:none}',
             '.ra-ghost-badge.ra-ahead{color:var(--entry-neon-green,#32d74b)}',
@@ -247,16 +252,20 @@
         var wordStats = computeWordStats(quote, typed, tl);
         var slow = slowestWords(wordStats, 5);
         var errWords = wordStats.filter(function (w) { return w.errors > 0; });
+        // keyData is this run only. Lifetime stats (data.keyHeatmap) are shown as a separate keyboard.
         var keyData = computeKeyStats(quote, typed, tl);
+        var lifetime = null;
         if (data.keyHeatmap && typeof data.keyHeatmap === 'object') {
+            lifetime = {};
             Object.keys(data.keyHeatmap).forEach(function (c) {
-                if (/^[a-zA-Z]$/.test(c)) keyData[c.toLowerCase()] = data.keyHeatmap[c];
+                if (/^[a-zA-Z]$/.test(c)) lifetime[c.toLowerCase()] = data.keyHeatmap[c];
             });
+            if (!Object.keys(lifetime).length) lifetime = null;
         }
         var letters = slowestLetters(keyData, 3);
         var burst = fastestBurst(tl, 3);
         var parts = [];
-        if (letters.length) parts.push('Slowest letters: ' + letters.join(', '));
+        if (letters.length) parts.push('Slowest letters this run: ' + letters.join(', '));
         if (burst) parts.push('Fastest burst: ' + burst.wpm + ' WPM over ' + burst.seconds + 's');
         else if (Array.isArray(data.wpmSamples) && data.wpmSamples.length) {
             var peak = Math.max.apply(null, data.wpmSamples.map(function (s) { return s.wpm || 0; }));
@@ -287,8 +296,14 @@
         body.appendChild(el('div', 'ra-h', 'Words with errors'));
         body.appendChild(errWords.length ? chipRow(errWords.map(function (w) { return { word: w.word, note: w.errors + ' err' }; }), 'ra-err')
             : el('div', 'ra-empty', 'Clean run, no errors'));
-        body.appendChild(el('div', 'ra-h', 'Key heatmap'));
+        body.appendChild(el('div', 'ra-h', 'Key heatmap: this run'));
         body.appendChild(renderKeyboard(keyData));
+        if (lifetime) {
+            var det = el('details', 'ra-lifetime');
+            det.appendChild(el('summary', 'ra-h', 'Key heatmap: all your runs'));
+            det.appendChild(renderKeyboard(lifetime));
+            body.appendChild(det);
+        }
 
         wrap.appendChild(toggle); wrap.appendChild(body);
         container.appendChild(wrap);

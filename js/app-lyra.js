@@ -1,5 +1,52 @@
+// Lyra Gate (Story mode), the mining economy UI and the Story map.
+// Shared Lyra state variables are declared in js/app-leaderboard.js; the ones below are new here.
+let lyraVisibleWordWindow = LYRA_VISIBLE_WORD_WINDOW;
+let lyraStreamRenderKey = '';
+let lyraChapterStartsCache = new Map();
+let lyraParallaxFrame = 0;
+let lyraParallaxEvent = null;
+let lyraLastKeyAt = 0;
+let lyraMilestoneTimer = null;
+let lyraStatsChipEls = null;
+let lyraNextCrystalEstimate = { perWord: 0, wpm: -1, layer: -1 };
+let sectorParallaxFrame = 0;
+let sectorParallaxEvent = null;
+let sectorWrapRectCache = null;
+const LYRA_CHAPTERS_TO_CLEAR = 3;
+const LYRA_CHECKPOINT_BONUS_BASE = 100;
+const LYRA_CHECKPOINT_BONUS_STEP = 25;
+const LYRA_SECTOR_CLEAR_BONUS = 500;
+const lyraReducedMotionQuery = (typeof window.matchMedia === 'function') ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+
 function isLyraGateOpen() {
     return !!document.getElementById('lyra-gate-modal')?.classList.contains('show');
+}
+
+// Plays a named sound from the shared SFX bank if it exists; never throws.
+function lyraPlaySound(name) {
+    try {
+        const bank = typeof SFX !== 'undefined' ? SFX : null;
+        const audio = bank && bank[name];
+        if (!audio || typeof playSound !== 'function') return;
+        playSound(audio);
+    } catch (e) { /* audio not ready yet */ }
+}
+
+// True when the player asked for less motion (system setting) or turned effects off.
+function isLyraMotionReduced() {
+    if (lyraReducedMotionQuery && lyraReducedMotionQuery.matches) return true;
+    return typeof miningVisualsEnabled !== 'undefined' && !miningVisualsEnabled;
+}
+
+function applyLyraMotionClass(el) {
+    if (!el) return;
+    el.classList.toggle('lyra-reduced-motion', isLyraMotionReduced());
+}
+
+// Words shown in the stream: fewer on narrow screens so the DOM stays small.
+function computeLyraVisibleWordWindow() {
+    const width = Math.max(240, Number(window.innerWidth) || 1280);
+    return Math.max(6, Math.min(LYRA_VISIBLE_WORD_WINDOW, Math.floor(width / 44)));
 }
 
 function scheduleLyraTimeout(fn, delay) {
@@ -79,7 +126,7 @@ function renderLyraStoryLoadingOverlay() {
     if (!overlay || !label || !fill || !meta) return;
     overlay.classList.toggle('active', !!lyraStoryLoadingState.active);
     overlay.setAttribute('aria-hidden', lyraStoryLoadingState.active ? 'false' : 'true');
-    label.textContent = lyraStoryLoadingState.label || 'Downloading Data...';
+    label.textContent = lyraStoryLoadingState.label || 'Loading book...';
     fill.style.width = `${Math.max(0, Math.min(100, Number(lyraStoryLoadingState.progress) || 0)).toFixed(1)}%`;
     meta.textContent = lyraStoryLoadingState.meta || `${Math.round(Number(lyraStoryLoadingState.progress) || 0)}%`;
 }
@@ -158,8 +205,8 @@ async function fetchLyraStoryPayload(book, options = {}) {
         setLyraStoryLoadingState({
             active: true,
             progress: 55,
-            label: 'Downloading Data...',
-            meta: totalBytes ? `${formatMiningNumber(totalBytes)} bytes` : 'Preparing stream',
+            label: 'Loading book...',
+            meta: totalBytes ? `${formatMiningNumber(totalBytes)} bytes` : 'Reading file',
         });
         return text;
     }
@@ -176,10 +223,10 @@ async function fetchLyraStoryPayload(book, options = {}) {
         setLyraStoryLoadingState({
             active: true,
             progress,
-            label: 'Downloading Data...',
+            label: 'Loading book...',
             meta: totalBytes > 0
-                ? `${Math.round((received / totalBytes) * 100)}% of source payload`
-                : `${formatMiningNumber(received)} bytes streamed`,
+                ? `${Math.round((received / totalBytes) * 100)}% downloaded`
+                : `${formatMiningNumber(received)} bytes downloaded`,
         });
     }
     text += decoder.decode();
@@ -198,16 +245,16 @@ async function loadLyraStoryBook(bookId, options = {}) {
     setLyraStoryLoadingState({
         active: true,
         progress: 4,
-        label: 'Downloading Data...',
-        meta: `Linking ${book.name}`,
+        label: 'Loading book...',
+        meta: `Opening ${book.name}`,
     });
     try {
         const rawText = await fetchLyraStoryPayload(book, options);
         setLyraStoryLoadingState({
             active: true,
             progress: 62,
-            label: 'Converting Data...',
-            meta: 'Preparing word array',
+            label: 'Preparing words...',
+            meta: 'Splitting into words',
         });
         const payload = JSON.parse(rawText);
         let words = [];
@@ -216,7 +263,7 @@ async function loadLyraStoryBook(bookId, options = {}) {
             setLyraStoryLoadingState({
                 active: true,
                 progress: 100,
-                label: 'Downloading Data...',
+                label: 'Loading book...',
                 meta: `${formatMiningNumber(words.length)} words ready`,
             });
         } else if (payload && typeof payload.text === 'string') {
@@ -225,7 +272,7 @@ async function loadLyraStoryBook(bookId, options = {}) {
                 setLyraStoryLoadingState({
                     active: true,
                     progress,
-                    label: 'Converting Data...',
+                    label: 'Preparing words...',
                     meta: `${formatMiningNumber(processed)} words processed`,
                 });
             });
@@ -235,26 +282,29 @@ async function loadLyraStoryBook(bookId, options = {}) {
                 setLyraStoryLoadingState({
                     active: true,
                     progress,
-                    label: 'Converting Data...',
+                    label: 'Preparing words...',
                     meta: `${formatMiningNumber(processed)} words processed`,
                 });
             });
         }
-        if (words.length > 0) lyraStoryLibraryCache.set(book.id, words);
+        if (words.length > 0) {
+            lyraStoryLibraryCache.set(book.id, words);
+            lyraChapterStartsCache.set(book.id, computeLyraChapterStarts(words));
+        }
         setLyraStoryLoadingState({
             active: true,
             progress: 100,
-            label: 'Downloading Data...',
+            label: 'Loading book...',
             meta: `${formatMiningNumber(words.length)} words ready`,
         });
         setTimeout(() => {
             if (lyraStoryLoadingState.progress >= 100) {
-                setLyraStoryLoadingState({ active: false, progress: 0, meta: '0%', label: 'Downloading Data...' });
+                setLyraStoryLoadingState({ active: false, progress: 0, meta: '0%', label: 'Loading book...' });
             }
         }, 180);
         return words;
     } catch (error) {
-        setLyraStoryLoadingState({ active: false, progress: 0, meta: '0%', label: 'Downloading Data...' });
+        setLyraStoryLoadingState({ active: false, progress: 0, meta: '0%', label: 'Loading book...' });
         throw error;
     }
 }
@@ -293,6 +343,8 @@ function updateLyraStoryResetMenu() {
     const toggle = document.getElementById('lyra-story-reset-toggle');
     const menu = document.getElementById('lyra-story-reset-menu');
     if (!wrap || !toggle || !menu) return;
+    const chapterOption = document.getElementById('lyra-story-reset-chapter');
+    if (chapterOption) chapterOption.hidden = !lyraBookHasChapters();
     wrap.classList.toggle('open', lyraStoryResetMenuOpen);
     toggle.setAttribute('aria-expanded', lyraStoryResetMenuOpen ? 'true' : 'false');
     menu.setAttribute('aria-hidden', lyraStoryResetMenuOpen ? 'false' : 'true');
@@ -313,15 +365,62 @@ function toggleLyraStoryResetMenu(event) {
 }
 window.toggleLyraStoryResetMenu = toggleLyraStoryResetMenu;
 
+// Chapter starts are word indexes where a heading word (CHAPTER, ADVENTURE, PART, BOOK) is
+// followed by a roman or arabic numeral. Index 0 always counts as the first chapter.
+// Computed once per book when it loads; the story files are data and are never executed.
+const LYRA_HEADING_WORDS = new Set(['CHAPTER', 'ADVENTURE', 'PART', 'BOOK']);
+const LYRA_ROMAN_NUMERAL = /^(?=[IVXLC])M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})[.:]?$/;
+const LYRA_ARABIC_NUMERAL = /^\d{1,3}[.:]?$/;
+
+function computeLyraChapterStarts(words) {
+    const starts = [0];
+    if (!Array.isArray(words)) return starts;
+    for (let i = 1; i < words.length - 1; i++) {
+        const word = String(words[i] || '');
+        const bare = word.replace(/[^A-Za-z]/g, '');
+        if (!LYRA_HEADING_WORDS.has(bare) || word !== word.toUpperCase()) continue;
+        const next = String(words[i + 1] || '');
+        if (LYRA_ROMAN_NUMERAL.test(next) || LYRA_ARABIC_NUMERAL.test(next)) starts.push(i);
+    }
+    return starts;
+}
+
+function getLyraChapterStarts(bookId = getLyraCurrentStoryBookId()) {
+    const cached = lyraChapterStartsCache.get(bookId);
+    if (cached) return cached;
+    const words = lyraStoryLibraryCache.get(bookId);
+    if (!words || !words.length) return [0];
+    const starts = computeLyraChapterStarts(words);
+    lyraChapterStartsCache.set(bookId, starts);
+    return starts;
+}
+
+function lyraBookHasChapters(bookId = getLyraCurrentStoryBookId()) {
+    return getLyraChapterStarts(bookId).length > 1;
+}
+
 function getLyraCurrentChapterStartIndex() {
     const storyWords = getLyraCurrentStoryWords();
     const currentIndex = Math.max(0, Math.floor(Number(lyraMiningState && lyraMiningState.currentStoryProgress) || 0));
     if (!storyWords.length || currentIndex <= 0) return 0;
-    for (let i = Math.min(currentIndex, storyWords.length - 1); i >= 0; i--) {
-        if (String(storyWords[i] || '').toUpperCase() === 'CHAPTER') {
-            return i;
-        }
+    const starts = getLyraChapterStarts();
+    let result = 0;
+    for (const start of starts) {
+        // A player sitting exactly on a chapter heading restarts the chapter before it.
+        if (start < currentIndex) result = start;
+        else break;
     }
+    return result;
+}
+
+// Chapter number (1-based) that ends at this word index, or 0 if none does.
+function getLyraChapterEndingAt(progressIndex, bookId = getLyraCurrentStoryBookId()) {
+    const starts = getLyraChapterStarts(bookId);
+    if (starts.length <= 1) return 0;
+    const words = lyraStoryLibraryCache.get(bookId) || [];
+    const idx = starts.indexOf(progressIndex);
+    if (idx > 0) return idx;
+    if (words.length && progressIndex === words.length) return starts.length;
     return 0;
 }
 
@@ -330,6 +429,7 @@ function restartLyraStoryProgress(scope) {
     if (!api || !lyraMiningState || typeof api.setCurrentStoryProgress !== 'function') return;
     const targetIndex = scope === 'book' ? 0 : getLyraCurrentChapterStartIndex();
     const updated = api.setCurrentStoryProgress(lyraMiningState, targetIndex);
+    removeLyraMilestoneSplash();
     lyraMiningState = updated.state;
     closeLyraStoryResetMenu();
     const restartSplash = document.querySelector('.lyra-clear-splash');
@@ -340,14 +440,14 @@ function restartLyraStoryProgress(scope) {
     }
     resetLyraGateState();
     resetLyraSceneForNextAsteroid();
-    renderLyraWordStream();
+    renderLyraWordStream(true);
     renderLyraMiningHud();
     renderLyraMiningSidebar();
     updateLyraStats();
     if (isLyraGateOpen()) startLyraStatsInterval();
     focusLyraInput();
     showUiMessage(
-        scope === 'book' ? 'Story progress reset to the beginning of the book.' : 'Story progress reset to the start of this chapter.',
+        scope === 'book' ? 'Back to the first word of the book.' : 'Back to the start of this chapter.',
         'info',
         1800,
         'top-right',
@@ -358,7 +458,7 @@ window.restartLyraStoryProgress = restartLyraStoryProgress;
 function ensureLyraWordsBuffer(minWordCount = 120) {
     const storyWords = getLyraCurrentStoryWords();
     if (storyWords.length) {
-        const desiredCount = Math.max(1, Math.min(LYRA_VISIBLE_WORD_WINDOW, minWordCount));
+        const desiredCount = Math.max(1, Math.min(lyraVisibleWordWindow, minWordCount));
         lyraGateState.words = getLyraStoryWindow(lyraGateState.storyBaseIndex, desiredCount);
         return;
     }
@@ -371,9 +471,12 @@ function ensureLyraWordsBuffer(minWordCount = 120) {
 
 function resetLyraGateState() {
     clearLyraPendingTimeouts();
+    lyraVisibleWordWindow = computeLyraVisibleWordWindow();
+    lyraStreamRenderKey = '';
+    lyraLastKeyAt = 0;
     const storyBaseIndex = Math.max(0, Math.floor(Number(lyraMiningState && lyraMiningState.currentStoryProgress) || 0));
     lyraGateState = {
-        words: getLyraStoryWindow(storyBaseIndex, LYRA_VISIBLE_WORD_WINDOW),
+        words: getLyraStoryWindow(storyBaseIndex, lyraVisibleWordWindow),
         storyBaseIndex,
         typed: '',
         totalCompleted: 0,
@@ -461,9 +564,9 @@ function getLyraDisplayedDps(stats = null) {
     return passiveDps + getLyraActiveTypingDps();
 }
 
+// Hot path (called per animation frame): reads the already-sanitized state directly.
 function isLyraOverloadActive() {
-    const stats = getLyraEffectiveMiningStats();
-    return !!(stats && stats.overloadActive);
+    return !!(lyraMiningState && Number(lyraMiningState.overloadEndsAt) > Date.now());
 }
 
 function getLyraCurrentWpm() {
@@ -478,29 +581,53 @@ function getLyraAccuracyRatio() {
 }
 
 function getLyraComboMultiplierDisplay() {
-    return (1 + (Math.max(0, lyraGateState.comboStreak) * 0.03)).toFixed(2);
+    const api = getMiningApi();
+    const value = api && typeof api.getComboMultiplier === 'function'
+        ? api.getComboMultiplier(lyraGateState.comboStreak)
+        : Math.min(1.45, 1 + (Math.max(0, lyraGateState.comboStreak) * 0.03));
+    return value.toFixed(2);
 }
 
-function syncLyraMiningStateWithWallet(state) {
+// One wallet. The mining state owns the crystal count; the top-bar badge ("skill points")
+// is a mirror of it. Anything that changed the mirror while Lyra was closed (a level-up
+// bonus, a shop purchase) is applied as a difference, never by overwriting the wallet.
+function reconcileLyraWallet(state) {
     const api = getMiningApi();
     if (!api) return null;
     const normalized = api.recalculateDerivedState(state || api.loadMiningState());
-    const wallet = getSkillPoints();
-    const nextCrystals = Math.max(0, Math.floor(Number(wallet) || 0));
-    if (nextCrystals !== normalized.totalAetherCrystals) {
-        normalized.totalAetherCrystals = nextCrystals;
+    const mirror = Math.max(0, Math.floor(Number(typeof getSkillPoints === 'function' ? getSkillPoints() : 0) || 0));
+    const lastMirror = normalized.walletMirror;
+    if (lastMirror == null) {
+        // First run with the shared wallet: keep whichever count is larger so nobody loses crystals.
+        normalized.totalAetherCrystals = Math.max(normalized.totalAetherCrystals, mirror);
+    } else if (mirror !== lastMirror) {
+        normalized.totalAetherCrystals = Math.max(0, normalized.totalAetherCrystals + (mirror - lastMirror));
     }
+    normalized.walletMirror = normalized.totalAetherCrystals;
     lyraMiningState = api.saveMiningState(normalized);
+    pushLyraWalletMirror();
     return lyraMiningState;
+}
+
+// Copies the wallet to the badge (mirror) and records what was copied.
+function pushLyraWalletMirror() {
+    if (!lyraMiningState) return;
+    const crystals = Math.max(0, Math.floor(Number(lyraMiningState.totalAetherCrystals) || 0));
+    if (lyraMiningState.walletMirror !== crystals) {
+        lyraMiningState.walletMirror = crystals;
+        const api = getMiningApi();
+        if (api) lyraMiningState = api.saveMiningState(lyraMiningState);
+    }
+    if (typeof setSkillPoints === 'function' && getSkillPoints() !== crystals) setSkillPoints(crystals);
+    if (typeof updateSkillDisplay === 'function') updateSkillDisplay();
+    if (typeof scheduleProgressSync === 'function') scheduleProgressSync();
 }
 
 function syncLyraWalletFromMiningState(prevCrystalCount = null) {
     if (!lyraMiningState) return;
     const nextCrystals = Math.max(0, Math.floor(Number(lyraMiningState.totalAetherCrystals) || 0));
     if (prevCrystalCount == null || nextCrystals !== Math.floor(Number(prevCrystalCount) || 0)) {
-        setSkillPoints(nextCrystals);
-        updateSkillDisplay();
-        flushProgressSyncNow();
+        pushLyraWalletMirror();
     }
 }
 
@@ -536,6 +663,8 @@ function updateLyraAsteroidVisualState() {
         invalidateLyraSceneAnchors();
     }
     wrap.style.setProperty('--lyra-asteroid-size', `${displaySize}px`);
+    const scene = document.getElementById('lyra-scene');
+    if (scene) scene.style.setProperty('--lyra-asteroid-size', `${displaySize}px`);
     if (band === 'critical') wrap.style.setProperty('--lyra-asteroid-glow', 'rgba(248, 198, 96, 0.4)');
     else if (band === 'fractured') wrap.style.setProperty('--lyra-asteroid-glow', 'rgba(102, 233, 255, 0.34)');
     else wrap.style.setProperty('--lyra-asteroid-glow', 'rgba(124, 111, 247, 0.34)');
@@ -577,26 +706,27 @@ function ensureLyraDroneOrbitState(count) {
     lyraDroneOrbitState = next;
 }
 
+// Drones sit at left/top 0 and move with a transform only (no layout work per frame).
+// The orbit radius is scaled down on small scenes so drones stay inside the picture.
 function positionLyraDroneElement(drone, orbit, anchors, ts = performance.now()) {
     if (!drone || !orbit || !anchors) return;
+    const radiusScale = Math.max(0.45, Math.min(1, (anchors.sceneWidth || 600) / 520));
     const wobble = Math.sin((ts / 1000) * orbit.wobbleSpeed + orbit.phase) * orbit.wobbleAmp;
-    const radius = orbit.radius + wobble;
+    const radius = (orbit.radius + wobble) * radiusScale;
     const x = anchors.asteroidCenterX + Math.cos(orbit.angle) * radius;
     const bob = Math.sin((ts / 1000) * orbit.bobSpeed + orbit.phase * 1.7) * orbit.bobAmp;
     const y = anchors.asteroidCenterY + Math.sin(orbit.angle) * (radius * orbit.verticalScale) + bob;
     const facing = (Math.atan2(anchors.asteroidCenterY - y, anchors.asteroidCenterX - x) * 180 / Math.PI) + 90;
-    drone.style.left = `${x.toFixed(1)}px`;
-    drone.style.top = `${y.toFixed(1)}px`;
-    drone.style.transform = `translate(-50%, -50%) rotate(${facing.toFixed(2)}deg)`;
-    drone.dataset.orbitX = x.toFixed(2);
-    drone.dataset.orbitY = y.toFixed(2);
+    drone.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -50%) rotate(${facing.toFixed(2)}deg)`;
+    orbit.x = x;
+    orbit.y = y;
 }
 
 function updateLyraDroneOrbitFrame(ts) {
     const layer = document.getElementById('lyra-drone-layer');
     const anchors = getLyraSceneAnchors();
-    const drones = [...document.querySelectorAll('#lyra-drone-layer .lyra-drone')];
-    if (!layer || !anchors || drones.length === 0) {
+    const drones = layer ? layer.children : [];
+    if (!layer || !anchors || drones.length === 0 || isLyraMotionReduced()) {
         stopLyraDroneOrbitLoop();
         return;
     }
@@ -617,6 +747,13 @@ function updateLyraDroneOrbitFrame(ts) {
 
 function startLyraDroneOrbitLoop() {
     if (lyraDroneOrbitFrame) return;
+    if (isLyraMotionReduced()) {
+        // Reduced motion: park each drone on its orbit once, no animation loop.
+        const anchors = getLyraSceneAnchors();
+        const drones = document.querySelectorAll('#lyra-drone-layer .lyra-drone');
+        drones.forEach((drone, i) => positionLyraDroneElement(drone, lyraDroneOrbitState[i], anchors, 0));
+        return;
+    }
     lyraDroneOrbitLastTs = 0;
     lyraDroneOrbitFrame = requestAnimationFrame(updateLyraDroneOrbitFrame);
 }
@@ -715,24 +852,18 @@ function getLyraAsteroidImpactPoint(sourceX, sourceY, anchors = null) {
 function emitLyraDroneVolley(options = {}) {
     if (!isLyraGateOpen()) return;
     const laserLayer = document.getElementById('lyra-laser-layer');
-    const scene = document.getElementById('lyra-scene');
     const anchors = getLyraSceneAnchors();
     const drones = [...document.querySelectorAll('#lyra-drone-layer .lyra-drone')];
-    if (!laserLayer || !scene || !anchors || drones.length === 0) return;
-    const sceneRect = scene.getBoundingClientRect();
+    if (!laserLayer || !anchors || drones.length === 0) return;
     const popupValues = Array.isArray(options.popupValues) ? options.popupValues : [];
     const isCritical = !!options.isCritical;
     const isOverloadActive = !!options.isOverloadActive;
 
     for (const [index, drone] of drones.entries()) {
-        const core = drone.querySelector('.lyra-drone-core');
-        const sourceRect = (core || drone).getBoundingClientRect();
-        let x = (sourceRect.left - sceneRect.left) + (sourceRect.width * 0.5);
-        let y = (sourceRect.top - sceneRect.top) + (sourceRect.height * 0.5);
-        if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > sceneRect.width || y > sceneRect.height) {
-            x = Number(drone.dataset.orbitX);
-            y = Number(drone.dataset.orbitY);
-        }
+        // Drone positions come from the orbit state written by the last animation frame.
+        const orbit = lyraDroneOrbitState[index];
+        const x = orbit ? Number(orbit.x) : NaN;
+        const y = orbit ? Number(orbit.y) : NaN;
         if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
         const impactPoint = getLyraAsteroidImpactPoint(x, y, anchors);
         if (!impactPoint) continue;
@@ -785,7 +916,7 @@ function flashLyraAsteroidHit() {
 
 function triggerLyraCriticalShake() {
     const scene = document.getElementById('lyra-scene');
-    if (!scene) return;
+    if (!scene || isLyraMotionReduced()) return;
     scene.classList.remove('crit-shake');
     void scene.offsetWidth;
     scene.classList.add('crit-shake');
@@ -864,12 +995,16 @@ function drawLyraDamagePopups(ts) {
         ctx.font = popup.isCritical ? '900 34px "Ubuntu Mono", monospace' : '900 22px "Ubuntu Mono", monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.lineWidth = popup.isCritical ? 6 : 4;
-        ctx.strokeStyle = 'rgba(8, 15, 40, 0.74)';
+        // Two strokes instead of a shadow blur: a dark outline for contrast and a thin
+        // coloured halo. Blurred shadows are the most expensive thing a 2D canvas can draw.
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = popup.isCritical ? 8 : 6;
+        ctx.strokeStyle = popup.isCritical ? 'rgba(255, 77, 90, 0.28)' : 'rgba(125, 211, 252, 0.22)';
+        ctx.strokeText(popup.text, 0, 0);
+        ctx.lineWidth = popup.isCritical ? 4 : 3;
+        ctx.strokeStyle = 'rgba(8, 15, 40, 0.8)';
         ctx.strokeText(popup.text, 0, 0);
         ctx.fillStyle = popup.color;
-        ctx.shadowBlur = popup.isCritical ? 28 : 16;
-        ctx.shadowColor = popup.color;
         ctx.fillText(popup.text, 0, 0);
         ctx.restore();
     }
@@ -881,6 +1016,7 @@ function drawLyraDamagePopups(ts) {
 }
 
 function spawnLyraDamagePopup(value, options = {}) {
+    if (isLyraMotionReduced()) return;
     const anchors = getLyraSceneAnchors();
     if (!anchors) return;
     ensureLyraDamagePopupPool();
@@ -919,20 +1055,31 @@ function getLyraUpgradeIconSvg(upgradeId) {
 }
 
 function setLyraSidebarTab(tabId) {
-    lyraSidebarTab = ['systems', 'library', 'firmware', 'statistics'].includes(tabId) ? tabId : 'systems';
+    const next = ['systems', 'library', 'firmware', 'statistics'].includes(tabId) ? tabId : 'systems';
+    const changed = next !== lyraSidebarTab;
+    lyraSidebarTab = next;
     document.querySelectorAll('#lyra-upgrades-sidebar .lyra-sidebar-tab').forEach((button) => {
-        button.classList.toggle('active', button.dataset.lyraTab === lyraSidebarTab);
+        const isActive = button.dataset.lyraTab === lyraSidebarTab;
+        if (button.classList.contains('active') !== isActive) button.classList.toggle('active', isActive);
+        button.setAttribute('aria-selected', isActive ? 'true' : 'false');
     });
     document.querySelectorAll('#lyra-upgrades-sidebar .lyra-sidebar-panel').forEach((panel) => {
         const isActive = panel.id === `lyra-panel-${lyraSidebarTab}`;
-        panel.classList.toggle('active', isActive);
-        panel.style.opacity = isActive ? '1' : '0';
-        panel.style.visibility = isActive ? 'visible' : 'hidden';
-        panel.style.pointerEvents = isActive ? 'auto' : 'none';
-        panel.style.zIndex = isActive ? '2' : '1';
+        if (panel.classList.contains('active') !== isActive) panel.classList.toggle('active', isActive);
     });
+    // Only the visible tab is rendered; the others are built when the player opens them.
+    if (changed || !document.getElementById(`lyra-panel-${lyraSidebarTab}`)?.childElementCount) {
+        renderLyraSidebarPanel(lyraSidebarTab);
+    }
 }
 window.setLyraSidebarTab = setLyraSidebarTab;
+
+function renderLyraSidebarPanel(tabId) {
+    if (tabId === 'library') renderLyraLibraryPanel();
+    else if (tabId === 'firmware') renderLyraDroneSpecializationPanel();
+    else if (tabId === 'statistics') renderLyraStatisticsPanel();
+    else renderLyraSystemsPanel();
+}
 
 function setLyraSelectedUpgrade(upgradeId) {
     lyraSelectedUpgradeId = upgradeId || lyraSelectedUpgradeId;
@@ -973,9 +1120,10 @@ async function selectLyraStoryBook(bookId) {
         }
         const bookSplash = document.querySelector('.lyra-clear-splash');
         if (bookSplash) bookSplash.remove();
+        removeLyraMilestoneSplash();
         resetLyraGateState();
         resetLyraSceneForNextAsteroid();
-        renderLyraWordStream();
+        renderLyraWordStream(true);
         renderLyraMiningHud();
         renderLyraMiningSidebar();
         updateLyraStats();
@@ -998,18 +1146,18 @@ function renderLyraLibraryPanel() {
         <div class="lyra-library-panel">
             <div class="lyra-library-card">
                 <div class="lyra-library-head">
-                    <div class="lyra-library-title">Story Library</div>
-                    <div class="lyra-specialization-status">Story Mode</div>
+                    <div class="lyra-library-title">Books</div>
+                    <div class="lyra-specialization-status">Story mode</div>
                 </div>
-                <div class="lyra-library-copy">Mine through public domain books. Your place is saved after every completed word, so you resume exactly where you left off.</div>
+                <div class="lyra-library-copy">Type your way through a public-domain book. Your place is saved after every word, so you always pick up where you left off.</div>
                 <div class="lyra-library-books">
                     ${books.map((book) => {
         if (book.locked) {
             return `
                             <button type="button" class="lyra-library-book" disabled>
-                                <strong>New Books Coming Soon!</strong>
-                                <span>Locked</span>
-                                <small>Additional public-domain expeditions will unlock here.</small>
+                                <strong>More books later</strong>
+                                <span>Not available yet</span>
+                                <small>More public-domain books will appear here.</small>
                             </button>
                         `;
         }
@@ -1020,7 +1168,7 @@ function renderLyraLibraryPanel() {
                         <button type="button" class="lyra-library-book${activeBookId === book.id ? ' active' : ''}" onclick="selectLyraStoryBook('${book.id}')">
                             <strong>${escapeHtml(book.name)}</strong>
                             <span>${escapeHtml(book.author || 'Public Domain')}</span>
-                            <small>${savedProgress > 0 ? `Resume at word ${formatMiningNumber(savedProgress + 1)}` : 'Start from the beginning'}</small>
+                            <small>${savedProgress > 0 ? `Continue at word ${formatMiningNumber(savedProgress + 1)}` : 'Start from the beginning'}</small>
                         </button>
                     `;
     }).join('')}
@@ -1036,16 +1184,17 @@ function renderLyraDroneSpecializationPanel() {
     const api = getMiningApi();
     if (!panel || !api || !lyraMiningState) return;
     const dronesLevel = Math.max(0, Number(lyraMiningState.upgrades && lyraMiningState.upgrades.automated_drones) || 0);
-    const unlocked = dronesLevel >= 10;
+    const unlockLevel = Math.max(1, Number(api.DRONE_TYPE_UNLOCK_LEVEL) || 10);
+    const unlocked = dronesLevel >= unlockLevel;
     const currentSpec = lyraMiningState.droneSpecialization || '';
     if (!unlocked) {
         const lockedHtml = `
             <div class="lyra-specialization-card locked">
                 <div class="lyra-specialization-head">
-                    <div class="lyra-specialization-label">Drone Firmware</div>
+                    <div class="lyra-specialization-label">Drone types</div>
                     <div class="lyra-specialization-status">Locked</div>
                 </div>
-                <div class="lyra-specialization-desc">Reach Automated Limpet Drones level 10 to unlock Swarm, Precision, and Salvage firmware paths.</div>
+                <div class="lyra-specialization-desc">Get Helper drones to level ${unlockLevel} (now ${dronesLevel}) to choose a drone type: Swarm, Precision or Salvage.</div>
             </div>
         `;
         setLyraPanelHtml(panel, lockedHtml);
@@ -1055,10 +1204,10 @@ function renderLyraDroneSpecializationPanel() {
         <div class="lyra-specialization-panel">
         <div class="lyra-specialization-card">
             <div class="lyra-specialization-head">
-                <div class="lyra-specialization-label">Drone Firmware</div>
-                <div class="lyra-specialization-status">${currentSpec ? 'Selected' : 'Choose Path'}</div>
+                <div class="lyra-specialization-label">Drone types</div>
+                <div class="lyra-specialization-status">${currentSpec ? 'Chosen' : 'Pick one'}</div>
             </div>
-            <div class="lyra-specialization-desc">Firmware paths reshape passive mining behavior once the limpet network is mature enough.</div>
+            <div class="lyra-specialization-desc">Each type changes how your helper drones hit. You can switch any time.</div>
             <div class="lyra-specialization-options">
                 ${api.DRONE_SPECIALIZATIONS.map((spec) => {
                     const needLevel = Number(spec.unlockLevel) || 10;
@@ -1071,7 +1220,7 @@ function renderLyraDroneSpecializationPanel() {
                         ${specLocked ? 'disabled aria-disabled="true"' : ''}
                     >
                         <strong>${escapeHtml(spec.name)}</strong>
-                        <span>${specLocked ? `Unlocks at drone level ${needLevel}` : escapeHtml(spec.description)}</span>
+                        <span>${specLocked ? `Needs Helper drones level ${needLevel}` : escapeHtml(spec.description)}</span>
                     </button>
                 `;
                 }).join('')}
@@ -1086,53 +1235,68 @@ function renderLyraStatisticsPanel() {
     const panel = document.getElementById('lyra-panel-statistics');
     const api = getMiningApi();
     if (!panel || !api || !lyraMiningState) return;
-    const effectiveStats = getLyraEffectiveMiningStats();
-    const displayDps = getLyraDisplayedDps(effectiveStats);
-    const accuracy = Math.round(getLyraAccuracyRatio() * 100);
-    const overloadMeter = effectiveStats ? Math.round(effectiveStats.overloadMeter) : 0;
-    const overloadState = effectiveStats && effectiveStats.overloadActive ? 'Active' : overloadMeter >= 100 ? 'Primed' : 'Charging';
-    const html = `
+    if (!panel.childElementCount || !lyraStatsChipEls) {
+        // Build the panel once; after that only the numbers change (setLyraText).
+        panel.innerHTML = `
         <div class="lyra-statistics-panel">
             <div class="lyra-stat-card">
-                <div class="lyra-stat-card-title">Mining Telemetry</div>
+                <div class="lyra-stat-card-title">Stats</div>
                 <div class="lyra-stat-grid">
-                    <div class="lyra-stat-chip"><span>DPS</span><strong>${formatMiningNumber(displayDps)}</strong></div>
-                    <div class="lyra-stat-chip"><span>Crit Chance</span><strong>${Math.round((lyraMiningState.critChance || 0) * 100)}%</strong></div>
-                    <div class="lyra-stat-chip"><span>Crit Damage</span><strong>${Number(lyraMiningState.critMultiplier || 0).toFixed(1)}x</strong></div>
-                    <div class="lyra-stat-chip"><span>Accuracy</span><strong>${accuracy}%</strong></div>
+                    <div class="lyra-stat-chip"><span>Hits per second</span><strong data-lyra-stat="dps">0</strong></div>
+                    <div class="lyra-stat-chip"><span>Bonus hit chance</span><strong data-lyra-stat="crit">0%</strong></div>
+                    <div class="lyra-stat-chip"><span>Bonus hit damage</span><strong data-lyra-stat="critx">2.0x</strong></div>
+                    <div class="lyra-stat-chip"><span>Accuracy</span><strong data-lyra-stat="acc">100%</strong></div>
                 </div>
             </div>
             <div class="lyra-stat-card">
-                <div class="lyra-stat-card-title">Burst Status</div>
+                <div class="lyra-stat-card-title">Power boost</div>
                 <div class="lyra-stat-grid">
-                    <div class="lyra-stat-chip"><span>Overload</span><strong>${overloadState}</strong></div>
-                    <div class="lyra-stat-chip"><span>Charge</span><strong>${overloadMeter}%</strong></div>
-                    <div class="lyra-stat-chip"><span>Streak</span><strong>${lyraGateState.comboStreak}</strong></div>
-                    <div class="lyra-stat-chip"><span>Lifetime Dmg</span><strong>${formatMiningNumber(lyraMiningState.totalDamageDealt || 0)}</strong></div>
+                    <div class="lyra-stat-chip"><span>Status</span><strong data-lyra-stat="boost">Charging</strong></div>
+                    <div class="lyra-stat-chip"><span>Charge</span><strong data-lyra-stat="charge">0%</strong></div>
+                    <div class="lyra-stat-chip"><span>Letters in a row</span><strong data-lyra-stat="streak">0</strong></div>
+                    <div class="lyra-stat-chip"><span>Total hits</span><strong data-lyra-stat="total">0</strong></div>
                 </div>
             </div>
-        </div>
-    `;
-    setLyraPanelHtml(panel, html);
+        </div>`;
+        lyraStatsChipEls = {};
+        panel.querySelectorAll('[data-lyra-stat]').forEach((el) => { lyraStatsChipEls[el.dataset.lyraStat] = el; });
+    }
+    const effectiveStats = getLyraEffectiveMiningStats();
+    const displayDps = getLyraDisplayedDps(effectiveStats);
+    const overloadMeter = effectiveStats ? Math.round(effectiveStats.overloadMeter) : 0;
+    const overloadState = effectiveStats && effectiveStats.overloadActive ? 'On' : overloadMeter >= 100 ? 'Ready' : 'Charging';
+    const c = lyraStatsChipEls;
+    setLyraText(c.dps, formatMiningNumber(displayDps));
+    setLyraText(c.crit, `${Math.round((lyraMiningState.critChance || 0) * 100)}%`);
+    setLyraText(c.critx, `${Number(lyraMiningState.critMultiplier || 0).toFixed(1)}x`);
+    setLyraText(c.acc, `${Math.round(getLyraAccuracyRatio() * 100)}%`);
+    setLyraText(c.boost, overloadState);
+    setLyraText(c.charge, `${overloadMeter}%`);
+    setLyraText(c.streak, String(lyraGateState.comboStreak));
+    setLyraText(c.total, formatMiningNumber(lyraMiningState.totalDamageDealt || 0));
 }
 
 function renderLyraMiningSidebar() {
     const crystalsEl = document.getElementById('lyra-sidebar-crystals');
     const layerEl = document.getElementById('lyra-sidebar-layer');
     const dpsEl = document.getElementById('lyra-sidebar-dps');
+    if (!lyraMiningState) return;
+    const api = getMiningApi();
+    if (!api) return;
+    const wallet = Math.max(0, Math.floor(Number(lyraMiningState.totalAetherCrystals) || 0));
+    const displayDps = getLyraDisplayedDps(getLyraEffectiveMiningStats());
+    setLyraText(crystalsEl, formatMiningNumber(wallet));
+    setLyraText(layerEl, formatMiningNumber((Number(lyraMiningState.currentLayer) || 0) + 1));
+    setLyraText(dpsEl, formatMiningNumber(displayDps));
+    renderLyraSidebarPanel(lyraSidebarTab);
+}
+
+function renderLyraSystemsPanel() {
     const systemsPanel = document.getElementById('lyra-panel-systems');
     if (!systemsPanel || !lyraMiningState) return;
     const api = getMiningApi();
     if (!api) return;
     const wallet = Math.max(0, Math.floor(Number(lyraMiningState.totalAetherCrystals) || 0));
-    const effects = api.getUpgradeEffects(lyraMiningState.upgrades);
-    const effectiveStats = typeof api.getEffectiveMiningStats === 'function'
-        ? api.getEffectiveMiningStats(lyraMiningState, Date.now())
-        : null;
-    const displayDps = getLyraDisplayedDps(effectiveStats);
-    setLyraText(crystalsEl, formatMiningNumber(wallet));
-    setLyraText(layerEl, formatMiningNumber((Number(lyraMiningState.currentLayer) || 0) + 1));
-    setLyraText(dpsEl, formatMiningNumber(displayDps || effects.dps));
     const visibleUpgrades = api.MINING_UPGRADES.filter((upgrade) => ['automation', 'active', 'bridge', 'critical'].includes(upgrade.category));
     if (!visibleUpgrades.some((upgrade) => upgrade.id === lyraSelectedUpgradeId)) {
         lyraSelectedUpgradeId = visibleUpgrades[0] ? visibleUpgrades[0].id : '';
@@ -1145,14 +1309,14 @@ function renderLyraMiningSidebar() {
     const selectedEffectText = !selectedUpgrade
         ? ''
         : selectedUpgrade.id === 'automated_drones'
-            ? `+${formatMiningNumber(selectedEffect.dps || 0)} DPS next level`
+            ? `${Number(selectedEffect.dps || 0).toFixed(1)} drone hits per second`
             : selectedUpgrade.id === 'laser_drills'
-                ? `+${formatMiningNumber(selectedEffect.baseDamageBonus || 0)} active damage`
+                ? `+${formatMiningNumber(selectedEffect.baseDamageBonus || 0)} damage per letter`
                 : selectedUpgrade.id === 'buffer_optimizations'
-                    ? `+${Math.round((selectedEffect.wpmMultiplierBonus || 0) * 100)}% WPM scaling`
+                    ? `+${Math.round((selectedEffect.wpmMultiplierBonus || 0) * 100)}% speed damage, +${Math.round((selectedEffect.crystalYieldBonus || 0) * 100)}% crystals`
                     : selectedUpgrade.id === 'neural_focus'
-                        ? `+${Math.round((selectedEffect.critChanceBonus || 0) * 100)}% crit chance`
-                        : `+${Number(selectedEffect.critMultiplierBonus || 0).toFixed(1)}x crit damage`;
+                        ? `${Math.round((0.05 + (selectedEffect.critChanceBonus || 0)) * 100)}% bonus-hit chance`
+                        : `+${Math.round((selectedEffect.droneDamageBonus || 0) * 100)}% drone damage`;
     const systemsHtml = `
         <div class="lyra-systems-panel">
         <div class="lyra-upgrade-list">
@@ -1185,26 +1349,22 @@ function renderLyraMiningSidebar() {
                 <div class="lyra-upgrade-detail-copy">${escapeHtml(selectedUpgrade.description)}</div>
                 <div class="lyra-upgrade-detail-meta">
                     <div class="lyra-upgrade-detail-chip">
-                        <span>Effect</span>
+                        <span>Next level</span>
                         <strong>${escapeHtml(selectedEffectText)}</strong>
                     </div>
                     <div class="lyra-upgrade-detail-chip">
                         <span>Cost</span>
-                        <strong>${formatMiningNumber(selectedCost)}</strong>
+                        <strong>${formatMiningNumber(selectedCost)} crystals</strong>
                     </div>
                 </div>
                 <button type="button" class="lyra-upgrade-buy${selectedAffordable ? ' can-afford' : ''}" onclick="purchaseLyraMiningUpgrade('${selectedUpgrade.id}', this)" ${selectedAffordable ? '' : 'disabled'}>
-                    ${selectedLevel >= selectedUpgrade.maxLevel ? 'Maxed' : 'Purchase'}
+                    ${selectedLevel >= selectedUpgrade.maxLevel ? 'Top level reached' : selectedAffordable ? `Buy for ${formatMiningNumber(selectedCost)}` : `Need ${formatMiningNumber(Math.max(0, selectedCost - wallet))} more`}
                 </button>
             </div>
         ` : ''}
         </div>
     `;
     setLyraPanelHtml(systemsPanel, systemsHtml);
-    renderLyraLibraryPanel();
-    renderLyraDroneSpecializationPanel();
-    renderLyraStatisticsPanel();
-    setLyraSidebarTab(lyraSidebarTab);
 }
 
 function updateLyraOverloadVisualState(stats = null) {
@@ -1230,21 +1390,15 @@ function updateLyraOverloadVisualState(stats = null) {
         const segmentLevel = Number(segment.getAttribute('data-overload-segment')) || 0;
         segment.classList.toggle('active', activeSegments >= segmentLevel);
     });
-    if (statusEl) {
-        if (active) {
-            statusEl.textContent = `${(remainingMs / 1000).toFixed(1)}s`;
-        } else {
-            statusEl.textContent = `${Math.round(meter)}%`;
-        }
-    }
+    if (statusEl) setLyraText(statusEl, active ? `${(remainingMs / 1000).toFixed(1)}s` : `${Math.round(meter)}%`);
     if (hintEl) {
         hintEl.classList.toggle('lyra-overload-charging', hintState === 'charging');
-        hintEl.textContent = hintState === 'charging' ? 'Charging' : hintState === 'ready' ? 'Primed' : 'Active';
+        setLyraText(hintEl, hintState === 'charging' ? 'Charging' : hintState === 'ready' ? 'Ready (press Tab)' : 'On');
     }
     if (triggerEl) {
         triggerEl.disabled = !ready;
         triggerEl.classList.toggle('ready', ready);
-        triggerEl.textContent = active ? 'Engaged' : 'Activate';
+        setLyraText(triggerEl, active ? 'On' : 'Turn on');
     }
     if (wrap) wrap.classList.toggle('overload-active', active);
     if (scene) scene.classList.toggle('overload-active', active);
@@ -1275,29 +1429,81 @@ function renderLyraMiningHudNow() {
     const comboText = `x${getLyraComboMultiplierDisplay()}`;
     const effectiveStats = getLyraEffectiveMiningStats();
     const displayDps = getLyraDisplayedDps(effectiveStats);
-    const progressText = `Layer ${formatMiningNumber((Number(lyraMiningState.currentLayer) || 0) + 1)} · HP ${formatMiningNumber(hp)} / ${formatMiningNumber(maxHp)} · Combo ${comboText}`;
+    const progressText = `Layer ${formatMiningNumber((Number(lyraMiningState.currentLayer) || 0) + 1)} · ${formatMiningNumber(hp)} of ${formatMiningNumber(maxHp)} hits left · Combo ${comboText}`;
     setLyraText(progressEl, progressText);
     setLyraText(hpEl, `${formatMiningNumber(hp)} / ${formatMiningNumber(maxHp)}`);
     setLyraText(dpsEl, formatMiningNumber(displayDps));
     setLyraText(comboEl, comboText);
+    renderLyraNextCrystalBar(hp, maxHp);
     updateLyraAsteroidVisualState();
     updateLyraOverloadVisualState(effectiveStats);
     renderLyraMiningDrones();
     renderLyraMiningSidebar();
 }
 
-function applyLyraMiningDamage(damageAmount, source = 'typing') {
+// Expected damage from one typed word at the player's current speed (cached per WPM/layer).
+function getLyraExpectedDamagePerWord() {
+    const api = getMiningApi();
+    if (!api || !lyraMiningState) return 0;
+    const wpm = Math.max(25, getLyraCurrentWpm() || 40);
+    const layer = Number(lyraMiningState.currentLayer) || 0;
+    const key = `${wpm}:${layer}:${lyraMiningState.upgrades && lyraMiningState.upgrades.laser_drills}:${lyraMiningState.upgrades && lyraMiningState.upgrades.buffer_optimizations}`;
+    if (lyraNextCrystalEstimate.key === key) return lyraNextCrystalEstimate.perWord;
+    const effects = api.getUpgradeEffects(lyraMiningState.upgrades);
+    const accuracy = getLyraAccuracyRatio();
+    const common = {
+        wpm,
+        accuracy,
+        sessionAccuracy: accuracy,
+        combo: 12,
+        bufferBonus: effects.wpmMultiplierBonus,
+        activeUpgradeBonus: effects.baseDamageBonus,
+        critChance: 0,
+        critMultiplier: 1,
+        isOverloadActive: false,
+        rollForCrit: false,
+    };
+    const perChar = api.calculateDamage({ ...common, charactersTyped: 1 }).activeDamage;
+    const completion = api.calculateDamage({ ...common, charactersTyped: 5 }).activeDamage;
+    const perWord = Math.max(1, perChar * 5 + completion);
+    lyraNextCrystalEstimate = { key, perWord };
+    return perWord;
+}
+
+function renderLyraNextCrystalBar(hp, maxHp) {
+    const fill = document.getElementById('lyra-next-crystal-fill');
+    const label = document.getElementById('lyra-next-crystal-label');
+    if (!fill || !label || !lyraMiningState) return;
+    const api = getMiningApi();
+    const ratio = Math.max(0, Math.min(1, 1 - (hp / Math.max(1, maxHp))));
+    const width = `${(ratio * 100).toFixed(1)}%`;
+    if (fill.style.width !== width) fill.style.width = width;
+    const perWord = getLyraExpectedDamagePerWord();
+    const words = perWord > 0 ? Math.max(1, Math.ceil(hp / perWord)) : 0;
+    const reward = api && typeof api.getLayerCrystalReward === 'function'
+        ? api.getLayerCrystalReward(lyraMiningState.currentLayer, lyraMiningState.upgrades)
+        : 1;
+    setLyraText(label, words > 0
+        ? `About ${words} ${words === 1 ? 'word' : 'words'} to the next ${reward} ${reward === 1 ? 'crystal' : 'crystals'}`
+        : `Next layer pays ${reward} crystals`);
+}
+
+// persist=false skips the localStorage write (the word handler saves once per word instead);
+// a shattered layer always saves because it changes the wallet.
+function applyLyraMiningDamage(damageAmount, source = 'typing', persist = true) {
     const api = getMiningApi();
     if (!api || !lyraMiningState) return null;
     const prevCrystals = lyraMiningState.totalAetherCrystals;
-    const applied = api.applyDamageToState(lyraMiningState, damageAmount, { source });
+    const applied = api.applyDamageToState(lyraMiningState, damageAmount, { source, skipSave: !persist });
     lyraMiningState = applied.state;
     recordLyraDamageBurst(damageAmount, source);
-    syncLyraWalletFromMiningState(prevCrystals);
-    renderLyraMiningHud();
     if (applied.result && applied.result.shatteredLayers > 0) {
+        if (!persist) lyraMiningState = api.saveMiningState(lyraMiningState);
+        syncLyraWalletFromMiningState(prevCrystals);
+        recordLyraLayerMilestone(applied.result.shatteredLayers);
         triggerLyraAsteroidCycle();
     }
+    renderLyraMiningHud();
     return applied;
 }
 
@@ -1331,32 +1537,33 @@ function tickLyraMiningPassiveDamage() {
                 isOverloadActive: !!ticked.overloadActive,
             }), i * 80);
         }
-        if (ticked.passiveCritApplied) triggerLyraCriticalShake();
+        if (ticked.passiveCritApplied && !ticked.overloadActive) triggerLyraCriticalShake();
     }
-    if (ticked.result && ticked.result.shatteredLayers > 0 && !lyraGateState.cycleBusy) {
-        triggerLyraAsteroidCycle();
+    if (ticked.result && ticked.result.shatteredLayers > 0) {
+        recordLyraLayerMilestone(ticked.result.shatteredLayers);
+        if (!lyraGateState.cycleBusy) triggerLyraAsteroidCycle();
     }
 }
 
 function purchaseLyraMiningUpgrade(upgradeId, buttonEl = null) {
     const api = getMiningApi();
     if (!api) return;
-    syncLyraMiningStateWithWallet(lyraMiningState);
+    reconcileLyraWallet(lyraMiningState);
     const purchased = api.purchaseMiningUpgrade(lyraMiningState, upgradeId);
     lyraMiningState = purchased.state;
     if (!purchased.ok) {
-        playSound(SFX.below50);
-        showUiMessage(purchased.error || 'Purchase failed.', 'error', 1600, 'top-left');
+        lyraPlaySound('below50');
+        showUiMessage(purchased.error || 'Could not buy that.', 'error', 1600, 'top-left');
         renderLyraMiningHud();
         return;
     }
-    setSkillPoints(Math.max(0, Math.floor(Number(lyraMiningState.totalAetherCrystals) || 0)));
-    updateSkillDisplay();
-    flushProgressSyncNow();
-    playSound(SFX.purchase1);
+    pushLyraWalletMirror();
+    lyraPlaySound('purchase1');
+    lyraPanelHtmlCache['lyra-panel-systems'] = '';
     renderLyraMiningHud();
     triggerLyraPurchaseFeedback(buttonEl);
-    showUiMessage(`${api.getUpgradeDefinition(upgradeId)?.name || 'Upgrade'} purchased.`, 'success', 1500, 'top-left');
+    const def = api.getUpgradeDefinition(upgradeId);
+    showUiMessage(`${def ? def.name : 'Upgrade'} is now level ${purchased.level}.`, 'success', 1500, 'top-left');
 }
 window.purchaseLyraMiningUpgrade = purchaseLyraMiningUpgrade;
 
@@ -1366,13 +1573,15 @@ function setLyraDroneSpecialization(specId) {
     const result = api.setDroneSpecialization(lyraMiningState, specId);
     lyraMiningState = result.state;
     renderLyraMiningHud();
+    lyraPanelHtmlCache['lyra-panel-firmware'] = '';
+    renderLyraSidebarPanel('firmware');
     if (!result.ok) {
-        playSound(SFX.below50);
-        showUiMessage(result.error || 'Unable to apply firmware path.', 'error', 1800, 'top-left');
+        lyraPlaySound('below50');
+        showUiMessage(result.error || 'Could not change the drone type.', 'error', 1800, 'top-left');
         return;
     }
-    playSound(SFX.purchase1);
-    showUiMessage(`${api.getDroneSpecializationDefinition(specId)?.name || 'Firmware'} online.`, 'success', 1600, 'top-left');
+    lyraPlaySound('purchase1');
+    showUiMessage(`${api.getDroneSpecializationDefinition(specId)?.name || 'New drone type'} ready.`, 'success', 1600, 'top-left');
 }
 window.setLyraDroneSpecialization = setLyraDroneSpecialization;
 
@@ -1383,9 +1592,18 @@ function triggerLyraOverload(source = 'key') {
     lyraMiningState = result.state;
     renderLyraMiningHud();
     if (!result.ok) return false;
-    playSound(SFX.levelUp);
-    if (source !== 'tick') showUiMessage('Aether Overload engaged.', 'success', 1400, 'top-left');
+    lyraPlaySound('ding');
+    triggerLyraCriticalShake();
+    if (source !== 'tick') showUiMessage('Power boost on: every word is a bonus hit and drones hit 3x for 10 seconds.', 'success', 1800, 'top-left');
     return true;
+}
+
+// Words still needed before the power boost is charged.
+function getLyraWordsToOverload() {
+    const api = getMiningApi();
+    const perWord = Math.max(0.01, Number(api && api.OVERLOAD_CHARGE_PER_WORD) || 2);
+    const meter = Math.max(0, Math.min(100, Number(lyraMiningState && lyraMiningState.overloadMeter) || 0));
+    return Math.max(0, Math.ceil((100 - meter) / perWord));
 }
 window.triggerLyraOverload = triggerLyraOverload;
 
@@ -1399,7 +1617,7 @@ async function setupLyraMiningMode(options = {}) {
     }
     lyraSetupInFlight = true;
     try {
-        syncLyraMiningStateWithWallet(api.loadMiningState());
+        reconcileLyraWallet(api.loadMiningState());
         await primeLyraCurrentStoryBook(!!options.force);
         if (generation !== lyraSetupGeneration) return false;
         const prevCrystals = lyraMiningState.totalAetherCrystals;
@@ -1425,7 +1643,7 @@ function handleLyraSetupFailure(error) {
     if (!isLyraGateOpen()) return;
     try {
         resetLyraSceneForNextAsteroid();
-        renderLyraWordStream();
+        renderLyraWordStream(true);
         focusLyraInput();
     } catch (renderError) {
         console.error('Lyra Gate fallback render failed', renderError);
@@ -1495,20 +1713,35 @@ async function submitLyraCommunityDamage(damage) {
 
 window.addEventListener('resize', () => {
     invalidateLyraSceneAnchors();
+    sectorWrapRectCache = null;
     if (!isLyraGateOpen()) return;
     resizeLyraPopupCanvas();
     updateLyraShipAim();
+    const nextWindow = computeLyraVisibleWordWindow();
+    if (nextWindow !== lyraVisibleWordWindow) {
+        lyraVisibleWordWindow = nextWindow;
+        ensureLyraWordsBuffer(lyraVisibleWordWindow);
+        renderLyraWordStream(true);
+    }
 });
 
-function renderLyraWordStream() {
+// Full render (all slots) when the word list changed or force=true; otherwise only the
+// active word's letters are touched, which is what happens on every keystroke.
+function renderLyraWordStream(force = false) {
     const stream = document.getElementById('lyra-quote-display');
     if (!stream) return;
-    ensureLyraWordsBuffer(LYRA_VISIBLE_WORD_WINDOW);
-    if (lyraWordSlots.length !== LYRA_VISIBLE_WORD_WINDOW || stream.childElementCount === 0) {
+    ensureLyraWordsBuffer(lyraVisibleWordWindow);
+    const renderKey = `${lyraGateState.storyBaseIndex}:${lyraGateState.words.length}:${lyraGateState.words[0] || ''}:${lyraVisibleWordWindow}`;
+    if (!force && renderKey === lyraStreamRenderKey && stream.childElementCount > 0) {
+        renderLyraActiveWord();
+        return;
+    }
+    lyraStreamRenderKey = renderKey;
+    if (lyraWordSlots.length !== lyraVisibleWordWindow || stream.childElementCount === 0) {
         lyraWordSlots = [];
         lyraCharSpans = [];
         stream.innerHTML = '';
-        for (let slotIndex = 0; slotIndex < LYRA_VISIBLE_WORD_WINDOW; slotIndex++) {
+        for (let slotIndex = 0; slotIndex < lyraVisibleWordWindow; slotIndex++) {
             const wordSpan = document.createElement('span');
             wordSpan.className = 'quote-word';
             wordSpan.style.whiteSpace = 'nowrap';
@@ -1567,13 +1800,26 @@ function renderLyraWordStream() {
         }
     }
     updateLyraShipAim();
-    updateLyraStats();
     renderLyraMiningHud();
     renderLyraStoryMeta();
     if (isLyraStoryComplete()) showLyraStoryCompleteSplash();
     updateLyraStoryResetMenu();
-    if (stream) {
-        stream.scrollLeft = 0;
+    if (stream.scrollLeft !== 0) stream.scrollLeft = 0;
+}
+
+// Updates only the letters of the word being typed.
+function renderLyraActiveWord() {
+    const slot = lyraWordSlots[0];
+    if (!slot) return;
+    const word = String(lyraGateState.words[0] || '');
+    const typed = String(lyraGateState.typed || '');
+    for (let i = 0; i < word.length && i < slot.charEls.length; i++) {
+        const span = slot.charEls[i];
+        let className;
+        if (i < typed.length) className = lyraCharsMatch(typed[i], word[i]) ? 'char-correct' : 'char-incorrect';
+        else if (i === typed.length) className = 'char-cursor';
+        else className = 'char-untyped';
+        if (span.className !== className) span.className = className;
     }
 }
 
@@ -1635,12 +1881,20 @@ function bindLyraSceneParallax() {
     const stars = document.getElementById('lyra-stars-layer');
     if (!scene || !stars || scene.dataset.parallaxBound) return;
     scene.dataset.parallaxBound = '1';
-    scene.addEventListener('mousemove', (e) => {
-        const rect = scene.getBoundingClientRect();
-        const rx = ((e.clientX - rect.left) / rect.width - 0.5);
-        const ry = ((e.clientY - rect.top) / rect.height - 0.5);
+    const paint = () => {
+        lyraParallaxFrame = 0;
+        const e = lyraParallaxEvent;
+        lyraParallaxEvent = null;
+        const anchors = getLyraSceneAnchors();
+        if (!e || !anchors || !anchors.sceneWidth || !anchors.sceneHeight || isLyraMotionReduced()) return;
+        const rx = ((e.clientX - anchors.sceneLeft) / anchors.sceneWidth - 0.5);
+        const ry = ((e.clientY - anchors.sceneTop) / anchors.sceneHeight - 0.5);
         stars.style.transform = `translate(${(-rx * 14).toFixed(1)}px, ${(-ry * 8).toFixed(1)}px)`;
-    });
+    };
+    scene.addEventListener('mousemove', (e) => {
+        lyraParallaxEvent = { clientX: e.clientX, clientY: e.clientY };
+        if (!lyraParallaxFrame) lyraParallaxFrame = requestAnimationFrame(paint);
+    }, { passive: true });
     scene.addEventListener('mouseleave', () => {
         stars.style.transform = 'translate(0, 0)';
     });
@@ -1671,6 +1925,10 @@ function getLyraSceneAnchors() {
         ? (muzzleRect.top - sRect.top) + (muzzleRect.height * 0.5)
         : (shipRect.top - sRect.top) + shipRect.height * 0.18;
     const anchors = {
+        sceneLeft: sRect.left,
+        sceneTop: sRect.top,
+        sceneWidth: sRect.width,
+        sceneHeight: sRect.height,
         shipCenterX: (shipRect.left - sRect.left) + shipRect.width * 0.5,
         shipCenterY: (shipRect.top - sRect.top) + shipRect.height * 0.5,
         shipMuzzleX: muzzleX,
@@ -1739,7 +1997,7 @@ function emitLyraLaserBurst() {
 }
 
 function emitLyraWordCompletionShatter() {
-    if (!isLyraGateOpen() || !miningVisualsEnabled) return;
+    if (!isLyraGateOpen() || isLyraMotionReduced()) return;
     const stream = document.getElementById('lyra-quote-display');
     const activeWord = stream ? stream.querySelector('.quote-word[data-lyra-active-word="1"]') : null;
     if (!stream || !activeWord) return;
@@ -1783,16 +2041,14 @@ function emitLyraWordCompletionShatter() {
 }
 
 function emitLyraAsteroidChunks(count = 1) {
-    if (!isLyraGateOpen()) return;
+    if (!isLyraGateOpen() || isLyraMotionReduced()) return;
     const chunkLayer = document.getElementById('lyra-chunk-layer');
-    const asteroidWrap = document.getElementById('lyra-asteroid-wrap');
-    const scene = document.getElementById('lyra-scene');
-    if (!chunkLayer || !asteroidWrap || !scene) return;
-    const sceneRect = scene.getBoundingClientRect();
-    const asteroidRect = asteroidWrap.getBoundingClientRect();
-    const cx = (asteroidRect.left - sceneRect.left) + asteroidRect.width * 0.5;
-    const cy = (asteroidRect.top - sceneRect.top) + asteroidRect.height * 0.5;
-    const radius = Math.min(asteroidRect.width, asteroidRect.height) * 0.42;
+    const anchors = getLyraSceneAnchors();
+    if (!chunkLayer || !anchors) return;
+    if (chunkLayer.childElementCount > 24) return; // keep the chunk count bounded during fast typing
+    const cx = anchors.asteroidCenterX;
+    const cy = anchors.asteroidCenterY;
+    const radius = anchors.asteroidRadius * 0.95;
     for (let i = 0; i < count; i++) {
         const theta = Math.random() * Math.PI * 2;
         const startX = cx + Math.cos(theta) * radius;
@@ -1819,7 +2075,8 @@ function emitLyraExplosionAndCrystals() {
     const crystalLayer = document.getElementById('lyra-crystal-layer');
     const explosionLayer = document.getElementById('lyra-explosion-layer');
     if (!anchors || !crystalLayer || !explosionLayer) return;
-    for (let i = 0; i < 14; i++) {
+    const reduced = isLyraMotionReduced();
+    for (let i = 0; i < (reduced ? 0 : 14); i++) {
         const px = document.createElement('span');
         px.className = 'lyra-explosion-pixel';
         px.style.left = `${(anchors.asteroidCenterX + (Math.random() - 0.5) * 26).toFixed(2)}px`;
@@ -1829,7 +2086,7 @@ function emitLyraExplosionAndCrystals() {
         explosionLayer.appendChild(px);
         setTimeout(() => px.remove(), 720);
     }
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < (reduced ? 6 : 16); i++) {
         const crystal = document.createElement('span');
         crystal.className = 'lyra-crystal';
         const sx = anchors.asteroidCenterX + (Math.random() - 0.5) * 68;
@@ -1890,39 +2147,110 @@ function triggerLyraAsteroidCycle() {
         if (!isLyraGateOpen()) return;
         lyraGateState.cycleBusy = false;
         resetLyraSceneForNextAsteroid();
-        renderLyraWordStream();
+        renderLyraWordStream(true);
+        focusLyraInput();
     }, 1600);
 }
 
-function showLyraGateClearSplash() {
+// ---- Story milestones: chapter checkpoints, layer checkpoints and the sector clear ----
+
+function getLyraMilestones(bookId = getLyraCurrentStoryBookId()) {
+    if (!lyraMiningState) return { chapters: 0, layers: 0, checkpoints: 0 };
+    if (!lyraMiningState.milestones || typeof lyraMiningState.milestones !== 'object') lyraMiningState.milestones = {};
+    const entry = lyraMiningState.milestones[bookId];
+    if (entry && typeof entry === 'object') return entry;
+    lyraMiningState.milestones[bookId] = { chapters: 0, layers: 0, checkpoints: 0 };
+    return lyraMiningState.milestones[bookId];
+}
+
+function awardLyraBonusCrystals(amount) {
+    const api = getMiningApi();
+    if (!api || !lyraMiningState) return 0;
+    const bonus = Math.max(0, Math.floor(Number(amount) || 0));
+    if (!bonus) return 0;
+    lyraMiningState.totalAetherCrystals = Math.max(0, Math.floor(Number(lyraMiningState.totalAetherCrystals) || 0)) + bonus;
+    lyraMiningState = api.saveMiningState(lyraMiningState);
+    pushLyraWalletMirror();
+    renderLyraMiningHud();
+    return bonus;
+}
+
+function removeLyraMilestoneSplash() {
+    if (lyraMilestoneTimer) { clearTimeout(lyraMilestoneTimer); lyraMilestoneTimer = null; }
+    document.querySelectorAll('.lyra-milestone-splash').forEach((el) => el.remove());
+}
+
+// Short, non-blocking splash. Typing keeps working underneath it.
+function showLyraMilestoneSplash({ title, subtitle, bonus = 0, big = false, holdMs = 2600 }) {
     const wrap = document.querySelector('.lyra-gate-wrap');
-    if (!wrap) return;
-    // Compute final stats
-    const elapsed = lyraGateState.startTime ? (performance.now() - lyraGateState.startTime) / 1000 : 0;
-    const minutes = elapsed / 60;
-    const wpm = minutes > 0 ? Math.round((lyraGateState.correctChars / 5) / minutes) : 0;
-    const acc = lyraGateState.totalChars > 0 ? Math.round((lyraGateState.correctChars / lyraGateState.totalChars) * 100) : 100;
-    const timeStr = `${Math.floor(elapsed / 60)}:${String(Math.floor(elapsed % 60)).padStart(2, '0')}`;
-
-    const starSvg = `<svg class="lyra-clear-star" viewBox="0 0 24 24"><path d="M12 2l2.9 6.26L22 9.27l-5 4.87L18.18 22 12 18.27 5.82 22 7 14.14 2 9.27l7.1-1.01z"/></svg>`;
-
+    if (!wrap || !isLyraGateOpen()) return;
+    removeLyraMilestoneSplash();
     const splash = document.createElement('div');
-    splash.className = 'lyra-clear-splash';
+    splash.className = `lyra-milestone-splash${big ? ' big' : ''}`;
+    splash.setAttribute('role', 'status');
     splash.innerHTML = `
-        <div class="lyra-clear-stars">${starSvg}${starSvg}${starSvg}</div>
-        <div class="lyra-clear-title">Lyra Gate Clear!</div>
-        <div class="lyra-clear-subtitle">All ${LYRA_ASTEROIDS_TO_CLEAR} asteroids have been mined</div>
-        <div class="lyra-clear-stats">
-            <span><strong>${wpm}</strong> WPM</span>
-            <span><strong>${acc}</strong>% ACC</span>
-            <span><strong>${timeStr}</strong></span>
-        </div>
-        <div class="lyra-clear-actions">
-            <button onclick="replayLyraGate()">Mine Again</button>
-            <button onclick="closeLyraGate()">Return to Sector Map</button>
-        </div>
+        <div class="lyra-milestone-title">${escapeHtml(title)}</div>
+        ${subtitle ? `<div class="lyra-milestone-subtitle">${escapeHtml(subtitle)}</div>` : ''}
+        ${bonus > 0 ? `<div class="lyra-milestone-bonus">+${formatMiningNumber(bonus)} crystals</div>` : ''}
     `;
     wrap.appendChild(splash);
+    lyraMilestoneTimer = setTimeout(() => {
+        lyraMilestoneTimer = null;
+        splash.classList.add('leaving');
+        setTimeout(() => splash.remove(), 400);
+    }, holdMs);
+}
+
+// Called once per checkpoint (a finished chapter, or 15 shattered layers in a book with no chapters).
+function recordLyraCheckpoint(label) {
+    const m = getLyraMilestones();
+    m.checkpoints = (Number(m.checkpoints) || 0) + 1;
+    const bonus = LYRA_CHECKPOINT_BONUS_BASE + LYRA_CHECKPOINT_BONUS_STEP * m.checkpoints;
+    const alreadyCleared = isSectorCleared('lyra');
+    const clearsNow = !alreadyCleared && m.checkpoints >= LYRA_CHAPTERS_TO_CLEAR;
+    awardLyraBonusCrystals(bonus + (clearsNow ? LYRA_SECTOR_CLEAR_BONUS : 0));
+    lyraPlaySound('completed');
+    if (clearsNow) {
+        markSectorCleared('lyra');
+        showLyraMilestoneSplash({
+            title: 'Lyra Gate cleared',
+            subtitle: `${label}. The sector is marked cleared on the story map. Keep reading for more crystals.`,
+            bonus: bonus + LYRA_SECTOR_CLEAR_BONUS,
+            big: true,
+            holdMs: 4200,
+        });
+        return;
+    }
+    const left = Math.max(0, LYRA_CHAPTERS_TO_CLEAR - m.checkpoints);
+    showLyraMilestoneSplash({
+        title: label,
+        subtitle: alreadyCleared ? 'Bonus crystals for finishing it.' : `${left} more to clear this sector.`,
+        bonus,
+    });
+}
+
+// After the story moved to word index `progress`: did that finish a chapter?
+function checkLyraChapterCheckpoint(progress) {
+    const chapter = getLyraChapterEndingAt(progress);
+    if (!chapter) return;
+    const m = getLyraMilestones();
+    if ((Number(m.chapters) || 0) >= chapter) return; // already credited (restart of a finished chapter)
+    m.chapters = chapter;
+    recordLyraCheckpoint(`Chapter ${chapter} complete`);
+}
+
+// Books without chapter headings use shattered layers instead.
+function recordLyraLayerMilestone(shatteredLayers) {
+    if (!lyraMiningState || !shatteredLayers) return;
+    const m = getLyraMilestones();
+    const before = Number(m.layers) || 0;
+    m.layers = before + shatteredLayers;
+    if (lyraBookHasChapters()) return;
+    const beforeCheckpoints = Math.floor(before / LYRA_ASTEROIDS_TO_CLEAR);
+    const afterCheckpoints = Math.floor(m.layers / LYRA_ASTEROIDS_TO_CLEAR);
+    if (afterCheckpoints > beforeCheckpoints) {
+        recordLyraCheckpoint(`Checkpoint ${afterCheckpoints}: ${m.layers} layers mined in this book`);
+    }
 }
 
 function showLyraStoryCompleteSplash() {
@@ -1935,29 +2263,16 @@ function showLyraStoryCompleteSplash() {
     const splash = document.createElement('div');
     splash.className = 'lyra-clear-splash';
     splash.innerHTML = `
-        <div class="lyra-clear-title">Story Complete!</div>
+        <div class="lyra-clear-title">Book finished</div>
         <div class="lyra-clear-subtitle">You reached the end of ${escapeHtml(currentBook ? currentBook.name : 'this book')}</div>
         <div class="lyra-clear-actions">
-            <button onclick="restartLyraStoryProgress('book')">Restart Book</button>
+            <button onclick="restartLyraStoryProgress('book')">Read it again</button>
             ${nextBook ? `<button onclick="selectLyraStoryBook('${escapeHtml(nextBook.id)}')">Next: ${escapeHtml(nextBook.name)}</button>` : ''}
-            <button onclick="closeLyraGate()">Return to Sector Map</button>
+            <button onclick="closeLyraGate()">Back to map</button>
         </div>
     `;
     wrap.appendChild(splash);
-}
-
-function replayLyraGate() {
-    const splash = document.querySelector('.lyra-clear-splash');
-    if (splash) splash.remove();
-    if (lyraStatsInterval) { clearInterval(lyraStatsInterval); lyraStatsInterval = null; }
-    stopLyraDamagePopupLoop();
-    resetLyraGateState();
-    runLyraSetup(() => {
-        resetLyraSceneForNextAsteroid();
-        renderLyraWordStream();
-        updateLyraStats();
-        focusLyraInput();
-    }, { force: getLyraCurrentStoryWords().length === 0 });
+    checkLyraChapterCheckpoint(getLyraCurrentStoryWords().length);
 }
 
 function handleLyraGateKeydown(e) {
@@ -1971,19 +2286,18 @@ function handleLyraGateKeydown(e) {
         return true;
     }
     if (e.key === 'Tab') {
+        // Tab only fires the power boost. It never restarts the session.
         playKeypressSound('Tab', e);
         e.preventDefault();
         e.stopPropagation();
+        if (e.repeat) return true;
         if (triggerLyraOverload('tab')) return true;
-        if (lyraStatsInterval) { clearInterval(lyraStatsInterval); lyraStatsInterval = null; }
-        stopLyraDamagePopupLoop();
-        resetLyraGateState();
-        runLyraSetup(() => {
-            resetLyraSceneForNextAsteroid();
-            renderLyraWordStream();
-            updateLyraStats();
-            focusLyraInput();
-        }, { force: getLyraCurrentStoryWords().length === 0 });
+        if (isLyraOverloadActive()) {
+            showUiMessage('Power boost is already on.', 'info', 1200, 'top-left');
+        } else {
+            const left = getLyraWordsToOverload();
+            showUiMessage(`Power boost not charged. ${left} more ${left === 1 ? 'word' : 'words'} to go.`, 'info', 1400, 'top-left');
+        }
         return true;
     }
     if (!lyraGateState.words.length) {
@@ -2009,7 +2323,7 @@ function handleLyraGateKeydown(e) {
             }
             lyraGateState.typed = lyraTypedNow.slice(0, lyraRemoveFrom);
         }
-        renderLyraWordStream();
+        renderLyraActiveWord();
         return true;
     }
     if (lyraKey === ' ' && e.key.length === 1) {
@@ -2020,15 +2334,15 @@ function handleLyraGateKeydown(e) {
         const isPerfectWord = lyraWordsMatch(lyraGateState.typed, currentWord);
         if (isPerfectWord) {
             emitLyraWordCompletionShatter();
-            if (miningLaserSoundEnabled) playSound(SFX.laser);
+            if (miningLaserSoundEnabled) lyraPlaySound('laser');
             lyraGateState.totalCompleted += 1;
             const api = getMiningApi();
+            let finishedProgress = -1;
             if (api && lyraMiningState) {
+                // Everything below changes the state in memory; one save at the end of the word.
                 if (typeof api.setCurrentStoryProgress === 'function' && getLyraCurrentStoryWords().length > 0) {
-                    const storyAdvance = api.setCurrentStoryProgress(
-                        lyraMiningState,
-                        Math.max(0, Number(lyraMiningState.currentStoryProgress) || 0) + 1,
-                    );
+                    finishedProgress = Math.max(0, Number(lyraMiningState.currentStoryProgress) || 0) + 1;
+                    const storyAdvance = api.setCurrentStoryProgress(lyraMiningState, finishedProgress, { skipSave: true });
                     lyraMiningState = storyAdvance.state;
                 }
                 const effects = api.getUpgradeEffects(lyraMiningState.upgrades);
@@ -2045,7 +2359,7 @@ function handleLyraGateKeydown(e) {
                     isOverloadActive: typeof api.isOverloadActive === 'function' ? api.isOverloadActive(lyraMiningState, Date.now()) : false,
                     rollForCrit: true,
                 });
-                const appliedCompletion = applyLyraMiningDamage(completionDamage.activeDamage, 'typing');
+                const appliedCompletion = applyLyraMiningDamage(completionDamage.activeDamage, 'typing', false);
                 if (appliedCompletion && completionDamage.activeDamage > 0) {
                     const completionAnchors = getLyraSceneAnchors();
                     const completionImpact = completionAnchors
@@ -2060,22 +2374,24 @@ function handleLyraGateKeydown(e) {
                     if (completionDamage.isCritical) triggerLyraCriticalShake();
                 }
                 if (typeof api.addOverloadCharge === 'function') {
-                    const charged = api.addOverloadCharge(lyraMiningState, api.OVERLOAD_CHARGE_PER_WORD || 2);
+                    const charged = api.addOverloadCharge(lyraMiningState, api.OVERLOAD_CHARGE_PER_WORD || 2, { skipSave: true });
                     lyraMiningState = charged.state;
-                    renderLyraMiningHud();
                 }
+                lyraMiningState = api.saveMiningState(lyraMiningState);
+                renderLyraMiningHud();
             }
             lyraGateState.storyBaseIndex += 1;
             if (lyraGateState.words.length > 0) lyraGateState.words.shift();
-            ensureLyraWordsBuffer(LYRA_VISIBLE_WORD_WINDOW);
+            ensureLyraWordsBuffer(lyraVisibleWordWindow);
             lyraGateState.typed = '';
             renderLyraWordStream();
+            if (finishedProgress > 0) checkLyraChapterCheckpoint(finishedProgress);
             return true;
         }
         lyraGateState.typed = '';
         lyraGateState.comboStreak = 0;
-        showUiMessage('Complete the word to advance the story.', 'info', 1000, 'top-right');
-        renderLyraWordStream();
+        showUiMessage('Finish the word (fix any wrong letters) before pressing space.', 'info', 1000, 'top-right');
+        renderLyraActiveWord();
         return true;
     }
     if (!isPrintableKeyEvent(e) || e.repeat) return false;
@@ -2091,6 +2407,19 @@ function handleLyraGateKeydown(e) {
     const expected = currentWord[nextIndex] || '';
     lyraGateState.typed += lyraKey;
     lyraGateState.totalChars++;
+    // Feed the weak-key tracker so Story mode typing improves drills too.
+    const keyNow = performance.now();
+    if (window.AdaptivePractice && /[a-z]/i.test(expected)) {
+        try {
+            AdaptivePractice.recordKeystroke({
+                expected,
+                typed: lyraKey,
+                prevChar: nextIndex > 0 ? currentWord[nextIndex - 1] : ' ',
+                msSincePrev: lyraLastKeyAt ? keyNow - lyraLastKeyAt : null,
+            });
+        } catch (err) { /* tracker is optional */ }
+    }
+    lyraLastKeyAt = keyNow;
     if (expected && lyraCharsMatch(lyraKey, expected)) {
         lyraGateState.correctChars++;
         lyraGateState.comboStreak += 1;
@@ -2112,7 +2441,7 @@ function handleLyraGateKeydown(e) {
                 isOverloadActive: typeof api.isOverloadActive === 'function' ? api.isOverloadActive(lyraMiningState, Date.now()) : false,
                 rollForCrit: false,
             });
-            const applied = applyLyraMiningDamage(damageInfo.activeDamage, 'typing');
+            const applied = applyLyraMiningDamage(damageInfo.activeDamage, 'typing', false);
             if (applied && damageInfo.activeDamage > 0) {
                 spawnLyraDamagePopup(damageInfo.activeDamage, {
                     x: laserImpact ? laserImpact.x : undefined,
@@ -2128,7 +2457,8 @@ function handleLyraGateKeydown(e) {
         lyraGateState.comboStreak = 0;
         updateLyraShipAim();
     }
-    renderLyraWordStream();
+    renderLyraActiveWord();
+    renderLyraMiningHud();
     return true;
 }
 
@@ -2148,16 +2478,23 @@ function openLyraGate() {
     try {
         stopLyraDamagePopupLoop();
         stopLyraDroneOrbitLoop();
-        resetLyraGateState();
+        clearLyraPendingTimeouts();
+        // Nothing can be typed until setup finishes (lyraSetupInFlight); the real reset happens
+        // in the ready callback below, once the saved place in the book is known.
+        lyraGateState.typed = '';
+        lyraGateState.cycleBusy = false;
         invalidateLyraSceneAnchors();
         lyraPanelHtmlCache = {};
+        lyraStatsChipEls = null;
+        applyLyraMotionClass(modal);
         const popupCanvasEl = document.getElementById('lyra-popup-canvas');
         if (popupCanvasEl) delete popupCanvasEl.dataset.lyraSized;
         if (lyraCommunityFlushInterval) clearInterval(lyraCommunityFlushInterval);
         lyraCommunityFlushInterval = setInterval(flushLyraCommunityDamage, LYRA_COMMUNITY_FLUSH_MS);
         runLyraSetup(() => {
+            resetLyraGateState();
             resetLyraSceneForNextAsteroid();
-            renderLyraWordStream();
+            renderLyraWordStream(true);
             setTimeout(() => {
                 updateLyraShipAim();
                 resizeLyraPopupCanvas();
@@ -2185,6 +2522,14 @@ function closeLyraGate() {
     const modal = document.getElementById('lyra-gate-modal');
     if (!modal) return;
     closeModal(modal);
+    closeLyraStoryResetMenu();
+    removeLyraMilestoneSplash();
+    // Save once on the way out (per-letter damage is kept in memory between words).
+    const api = getMiningApi();
+    if (api && lyraMiningState) {
+        lyraMiningState = api.saveMiningState(lyraMiningState);
+        pushLyraWalletMirror();
+    }
     lyraGateState.cycleBusy = false;
     lyraSetupGeneration++;
     lyraSetupInFlight = false;
@@ -2233,13 +2578,76 @@ document.addEventListener('click', (event) => {
 });
 
 function handleLyraGateBackdrop(event) {
-    if (event && event.target === document.getElementById('lyra-gate-modal')) closeLyraGate();
+    if (!event || event.target !== document.getElementById('lyra-gate-modal')) return;
+    if (lyraStoryResetMenuOpen) { closeLyraStoryResetMenu(); return; }
+    // A half-typed word means the click was most likely a slip; keep the gate open.
+    if (lyraGateState.typed.length > 0) {
+        focusLyraInput();
+        return;
+    }
+    closeLyraGate();
+}
+
+// Escape closes the restart menu first; only a second Escape closes the gate.
+// Runs in the capture phase so it sees the key before the global Escape handler.
+document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !isLyraGateOpen() || !lyraStoryResetMenuOpen) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeLyraStoryResetMenu();
+    focusLyraInput();
+}, true);
+
+// Save mining progress if the tab is hidden or closed mid-word.
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden || !isLyraGateOpen()) return;
+    const api = getMiningApi();
+    if (api && lyraMiningState) lyraMiningState = api.saveMiningState(lyraMiningState);
+});
+
+// XP for an Orion Bulwark run. Also used by the results card inside Orion itself.
+function handleOrionRunComplete(result) {
+    const r = result || {};
+    const xp = window.OrionMode && typeof OrionMode.xpForResult === 'function'
+        ? OrionMode.xpForResult(r)
+        : Math.min(300, Math.max(5, Math.round((r.score || 0) / 10 + (r.wave || 0) * 15 + (r.wordsDestroyed || 0))));
+    let levelUp = null;
+    if (typeof addXP === 'function') {
+        const xpResult = addXP(xp);
+        if (xpResult && xpResult.levelUp) levelUp = xpResult.level;
+    }
+    if (levelUp) showUiMessage(`Level ${levelUp}!`, 'success', 2600, 'top-right');
+    return { xp, levelUp };
+}
+window.handleOrionRunComplete = handleOrionRunComplete;
+
+function openOrionFromStoryMap() {
+    if (!window.OrionMode) return false;
+    closeSectorMap();
+    setTimeout(() => OrionMode.open({
+        wordPool: typeof WORD_LIST !== 'undefined' ? WORD_LIST : undefined,
+        onExit: () => { openSectorMap(); },
+        onRunComplete: handleOrionRunComplete,
+    }), 60);
+    return true;
+}
+
+function describeSectorStatus(node) {
+    if (!node) return '';
+    if (node.placeholder) return 'Coming later';
+    if (isSectorCleared(node.id)) return 'Cleared';
+    if (node.isAccessible) return 'Ready to play';
+    return `Reach level ${Math.max(1, Number(node.requiredLevel) || 1)}`;
 }
 
 function handleSectorSystemSelect(node) {
     if (!node) return;
+    if (node.placeholder) {
+        showUiMessage(`${node.name} is coming later.`, 'info', 1800, 'top-right');
+        return;
+    }
     if (!node.isAccessible) {
-        showUiMessage('Sector locked. Raise level and average WPM to unlock.', 'error', 2200, 'top-right');
+        showUiMessage(`${node.name} opens at level ${Math.max(1, Number(node.requiredLevel) || 1)}. Finish a few runs to level up.`, 'info', 2400, 'top-right');
         return;
     }
     if (node.id === 'lyra') {
@@ -2249,21 +2657,8 @@ function handleSectorSystemSelect(node) {
         }, 60);
         return;
     }
-    if (node.id === 'orion' && window.OrionMode) {
-        closeSectorMap();
-        setTimeout(() => OrionMode.open({
-            wordPool: WORD_LIST,
-            onExit: () => { openSectorMap(); },
-            onRunComplete: (r) => {
-                // Scaled to sit alongside challenge rewards (50-300 XP)
-                const xp = Math.min(300, Math.max(5, Math.round(r.score / 10 + r.wave * 15 + r.wordsDestroyed)));
-                const xpResult = addXP(xp);
-                showUiMessage(`Orion Bulwark: +${xp} XP${xpResult && xpResult.levelUp ? ` \u2022 Level ${xpResult.level}!` : ''}`, 'success', 2600, 'top-right');
-            },
-        }), 60);
-        return;
-    }
-    showUiMessage(`${node.name} travel missions are not online yet.`, 'warn', 2000, 'top-right');
+    if (node.id === 'orion' && openOrionFromStoryMap()) return;
+    showUiMessage(`${node.name} is coming later.`, 'info', 1800, 'top-right');
 }
 
 function handleSectorSystemSelectById(systemId) {
@@ -2275,14 +2670,16 @@ function handleSectorSystemSelectById(systemId) {
     handleSectorSystemSelect(node);
 }
 
+// Two sectors are real games today. The other five are placeholders shown greyed as "Coming later".
+// Opening a sector depends on player level only; there is no typing-speed gate.
 const SECTOR_MAP_SYSTEMS = [
-    { id: 'lyra', name: 'Lyra Gate', x: 150, y: 480, difficulty: 'easy', avgWpm: 35, requiredLevel: 1, unlocked: true, links: ['orion'] },
-    { id: 'orion', name: 'Orion Drift', x: 300, y: 390, difficulty: 'easy', avgWpm: 45, requiredLevel: 2, unlocked: true, links: ['perseus', 'vega'] },
-    { id: 'perseus', name: 'Perseus Spine', x: 470, y: 450, difficulty: 'medium', avgWpm: 60, requiredLevel: 4, unlocked: false, links: ['vega', 'antares'] },
-    { id: 'vega', name: 'Vega Expanse', x: 520, y: 280, difficulty: 'medium', avgWpm: 72, requiredLevel: 6, unlocked: false, links: ['antares', 'helios'] },
-    { id: 'antares', name: 'Antares Rift', x: 700, y: 380, difficulty: 'medium', avgWpm: 82, requiredLevel: 8, unlocked: false, links: ['helios', 'zenith'] },
-    { id: 'helios', name: 'Helios Crown', x: 810, y: 240, difficulty: 'high', avgWpm: 95, requiredLevel: 10, unlocked: false, links: ['zenith'] },
-    { id: 'zenith', name: 'Zenith Core', x: 1030, y: 310, difficulty: 'high', avgWpm: 110, requiredLevel: 12, unlocked: false, links: [] },
+    { id: 'lyra', name: 'Lyra Gate', blurb: 'Type a book, mine the asteroid', x: 150, y: 480, difficulty: 'easy', requiredLevel: 1, unlocked: true, links: ['orion'] },
+    { id: 'orion', name: 'Orion Bulwark', blurb: 'Shoot down falling words', x: 300, y: 390, difficulty: 'easy', requiredLevel: 2, unlocked: false, links: ['perseus', 'vega'] },
+    { id: 'perseus', name: 'Perseus Spine', blurb: 'Coming later', x: 470, y: 450, difficulty: 'medium', requiredLevel: 4, unlocked: false, placeholder: true, links: ['vega', 'antares'] },
+    { id: 'vega', name: 'Vega Expanse', blurb: 'Coming later', x: 520, y: 280, difficulty: 'medium', requiredLevel: 6, unlocked: false, placeholder: true, links: ['antares', 'helios'] },
+    { id: 'antares', name: 'Antares Rift', blurb: 'Coming later', x: 700, y: 380, difficulty: 'medium', requiredLevel: 8, unlocked: false, placeholder: true, links: ['helios', 'zenith'] },
+    { id: 'helios', name: 'Helios Crown', blurb: 'Coming later', x: 810, y: 240, difficulty: 'high', requiredLevel: 10, unlocked: false, placeholder: true, links: ['zenith'] },
+    { id: 'zenith', name: 'Zenith Core', blurb: 'Coming later', x: 1030, y: 310, difficulty: 'high', requiredLevel: 12, unlocked: false, placeholder: true, links: [] },
 ];
 let sectorMapResolvedSystems = [];
 
@@ -2314,16 +2711,20 @@ function getSectorNodeColorStyle(nodeId) {
 function updateSectorTacticalOverlay(systemId = '') {
     const body = document.getElementById('sector-tactical-body');
     if (!body) return;
-    body.textContent = 'Bright stars are travel-ready sectors. Dim stars are locked until your level and average WPM are high enough. Dotted links show active routes between sectors you can currently access.';
+    const source = Array.isArray(sectorMapResolvedSystems) && sectorMapResolvedSystems.length ? sectorMapResolvedSystems : [];
+    const node = systemId ? source.find((entry) => entry.id === systemId) : null;
+    const text = node
+        ? `${node.name}: ${node.blurb}. ${describeSectorStatus(node)}.`
+        : 'Click a bright star to play it. Grey stars open as you level up or are coming later.';
+    setLyraText(body, text);
 }
 
 function positionSectorNodeHoverBubble(event) {
     if (!event) return;
     const bubble = document.getElementById('sector-node-hover-bubble');
-    const wrap = document.querySelector('#sector-map-modal .sector-map-wrap');
-    if (!bubble || !wrap) return;
-    const rect = wrap.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
+    if (!bubble) return;
+    const rect = getSectorWrapRect();
+    if (!rect || !rect.width || !rect.height) return;
     const offset = 14;
     const bubbleWidth = Math.max(120, bubble.offsetWidth || 0);
     const bubbleHeight = Math.max(54, bubble.offsetHeight || 0);
@@ -2341,15 +2742,10 @@ function showSectorNodeHoverBubble(systemId, event) {
     const source = Array.isArray(sectorMapResolvedSystems) && sectorMapResolvedSystems.length ? sectorMapResolvedSystems : SECTOR_MAP_SYSTEMS;
     const node = source.find((s) => s.id === systemId);
     if (!node) return;
-    const requiredLevel = Math.max(1, Number(node.requiredLevel) || 1);
-    const requiredAvgWpm = Math.max(0, Number(node.avgWpm) || 0);
-    const statusReasons = [];
-    if (!node.pathUnlocked) statusReasons.push(`reach level ${requiredLevel}`);
-    if (!node.wpmQualified) statusReasons.push(`raise account average to ${Math.round(requiredAvgWpm)} WPM`);
     const cleared = isSectorCleared(node.id);
-    const accessText = cleared ? 'Cleared' : node.isAccessible ? 'Travel Ready' : `Locked: ${statusReasons.join(' and ')}`;
-    bubble.classList.toggle('is-ready', !!node.isAccessible);
-    bubble.innerHTML = `<strong>${escapeHtml(node.name)}</strong><br>Average WPM required to mine here: <strong>${Math.round(node.avgWpm)}</strong><br>Status: <strong style="${cleared ? 'color:#86efac' : ''}">${escapeHtml(accessText)}</strong>`;
+    const accessText = describeSectorStatus(node);
+    bubble.classList.toggle('is-ready', !!node.isAccessible && !node.placeholder);
+    bubble.innerHTML = `<strong>${escapeHtml(node.name)}</strong><br>${escapeHtml(node.blurb || '')}<br>Status: <strong style="${cleared ? 'color:#86efac' : ''}">${escapeHtml(accessText)}</strong>`;
     bubble.classList.add('show');
     bubble.setAttribute('aria-hidden', 'false');
     positionSectorNodeHoverBubble(event);
@@ -2380,27 +2776,20 @@ function renderSectorMap() {
         });
     }
     const playerLevel = getLevel(getTotalXP());
-    const history = loadHistory();
-    const validWpmValues = history
-        .map((entry) => Math.max(0, Number(entry && entry.wpm) || 0))
-        .filter((value) => value > 0);
-    const accountAvgWpm = validWpmValues.length
-        ? validWpmValues.reduce((sum, value) => sum + value, 0) / validWpmValues.length
-        : 0;
-    const systems = SECTOR_MAP_SYSTEMS.map((node) => ({
-        ...node,
-        pathUnlocked: !!node.unlocked || playerLevel >= Math.max(1, Number(node.requiredLevel) || 1),
-        wpmQualified: String(node.id) === 'lyra'
-            ? true
-            : accountAvgWpm >= Math.max(0, Number(node.avgWpm) || 0),
-        isAccessible: String(node.id) === 'lyra'
-            ? (!!node.unlocked || playerLevel >= Math.max(1, Number(node.requiredLevel) || 1))
-            : ((!!node.unlocked || playerLevel >= Math.max(1, Number(node.requiredLevel) || 1))
-                && accountAvgWpm >= Math.max(0, Number(node.avgWpm) || 0)),
-    }));
+    const systems = SECTOR_MAP_SYSTEMS.map((node) => {
+        const levelOk = !!node.unlocked || playerLevel >= Math.max(1, Number(node.requiredLevel) || 1);
+        return {
+            ...node,
+            pathUnlocked: levelOk,
+            wpmQualified: true,
+            isAccessible: levelOk && !node.placeholder,
+        };
+    });
     sectorMapResolvedSystems = systems;
+    applyLyraMotionClass(document.getElementById('sector-map-modal'));
+    renderSectorList(systems);
 
-    const starCount = 100 + Math.floor(Math.random() * 51);
+    const starCount = isLyraMotionReduced() ? 60 : 100 + Math.floor(Math.random() * 51);
     const regularStarPalette = ['#eff6ff', '#e2e8f0', '#dbeafe', '#bfdbfe'];
     const aetherStarPalette = ['#ddd6fe', '#c4b5fd', '#fde68a', '#facc15'];
     for (let i = 0; i < starCount; i++) {
@@ -2453,10 +2842,10 @@ function renderSectorMap() {
         const colorStyle = getSectorNodeColorStyle(node.id);
         const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
         const importanceClass = node.difficulty === 'high' ? 'sector-importance-high' : 'sector-importance-standard';
-        g.setAttribute('class', `sector-node ${node.isAccessible ? 'is-unlocked' : 'is-locked'} ${importanceClass}`);
-        g.setAttribute('tabindex', node.isAccessible ? '0' : '-1');
+        g.setAttribute('class', `sector-node ${node.isAccessible ? 'is-unlocked' : 'is-locked'}${node.placeholder ? ' is-placeholder' : ''} ${importanceClass}`);
+        g.setAttribute('tabindex', node.placeholder ? '-1' : '0');
         g.setAttribute('role', 'button');
-        g.setAttribute('aria-label', `${node.name}, average WPM ${Math.round(node.avgWpm)}, ${node.isAccessible ? 'accessible' : 'locked'}`);
+        g.setAttribute('aria-label', `${node.name}: ${node.blurb}. ${describeSectorStatus(node)}`);
         g.dataset.nodeId = node.id;
         g.addEventListener('focus', () => updateSectorTacticalOverlay(node.id));
         g.addEventListener('blur', hideSectorNodeHoverBubble);
@@ -2503,20 +2892,24 @@ function renderSectorMap() {
         g.appendChild(halo);
         g.appendChild(core);
 
-        // Cleared badge
-        if (isSectorCleared(node.id)) {
-            const badge = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            badge.setAttribute('x', String(node.x));
-            badge.setAttribute('y', String(node.y + style.hr + 16));
-            badge.setAttribute('text-anchor', 'middle');
-            badge.setAttribute('font-size', '9');
-            badge.setAttribute('font-weight', '800');
-            badge.setAttribute('letter-spacing', '0.12em');
-            badge.setAttribute('fill', '#86efac');
-            badge.setAttribute('class', 'sector-cleared-label');
-            badge.textContent = 'CLEARED';
-            g.appendChild(badge);
+        // Every node carries its name and its status so the map explains itself.
+        const nameLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        nameLabel.setAttribute('x', String(node.x));
+        nameLabel.setAttribute('y', String(node.y - style.hr - 10));
+        nameLabel.setAttribute('text-anchor', 'middle');
+        nameLabel.setAttribute('class', 'sector-node-name');
+        nameLabel.textContent = node.name;
+        g.appendChild(nameLabel);
+        const statusLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        statusLabel.setAttribute('x', String(node.x));
+        statusLabel.setAttribute('y', String(node.y + style.hr + 16));
+        statusLabel.setAttribute('text-anchor', 'middle');
+        statusLabel.setAttribute('class', `sector-node-status${isSectorCleared(node.id) ? ' is-cleared' : ''}`);
+        statusLabel.textContent = describeSectorStatus(node);
+        g.appendChild(statusLabel);
 
+        // Cleared tick mark
+        if (isSectorCleared(node.id)) {
             const check = document.createElementNS('http://www.w3.org/2000/svg', 'path');
             check.setAttribute('d', `M${node.x - 4},${node.y + 0.5} l3,3 l5,-6`);
             check.setAttribute('stroke', '#86efac');
@@ -2532,17 +2925,59 @@ function renderSectorMap() {
     updateSectorTacticalOverlay('');
 }
 
-function updateSectorStarsParallaxFromMouse(event) {
+// Phone-width view of the same sectors: a list of big buttons instead of small dots.
+function renderSectorList(systems) {
+    const list = document.getElementById('sector-map-list');
+    if (!list) return;
+    const html = systems.map((node) => {
+        const status = describeSectorStatus(node);
+        const cleared = isSectorCleared(node.id);
+        const state = node.placeholder ? 'placeholder' : node.isAccessible ? 'ready' : 'locked';
+        return `
+            <button type="button" class="sector-list-item is-${state}${cleared ? ' is-cleared' : ''}" data-sector-id="${escapeHtml(node.id)}" ${node.placeholder ? 'disabled' : ''}>
+                <span class="sector-list-orb" aria-hidden="true"></span>
+                <span class="sector-list-text">
+                    <strong>${escapeHtml(node.name)}</strong>
+                    <span>${escapeHtml(node.blurb || '')}</span>
+                </span>
+                <span class="sector-list-status">${escapeHtml(status)}</span>
+            </button>`;
+    }).join('');
+    if (list.innerHTML !== html) list.innerHTML = html;
+    if (!list.dataset.clickBound) {
+        list.dataset.clickBound = '1';
+        list.addEventListener('click', (event) => {
+            const target = event.target instanceof Element ? event.target.closest('.sector-list-item') : null;
+            if (target && target.dataset.sectorId) handleSectorSystemSelectById(target.dataset.sectorId);
+        });
+    }
+}
+
+function getSectorWrapRect() {
+    if (sectorWrapRectCache) return sectorWrapRectCache;
     const wrap = document.querySelector('#sector-map-modal .sector-map-wrap');
-    const starsLayer = document.getElementById('sector-map-stars');
-    if (!wrap || !starsLayer || !event) return;
+    if (!wrap) return null;
     const rect = wrap.getBoundingClientRect();
-    if (!rect.width || !rect.height) return;
-    const relX = ((event.clientX - rect.left) / rect.width) - 0.5;
-    const relY = ((event.clientY - rect.top) / rect.height) - 0.5;
-    const tx = (-relX * 16).toFixed(2);
-    const ty = (-relY * 10).toFixed(2);
-    starsLayer.setAttribute('transform', `translate(${tx} ${ty})`);
+    if (rect.width > 0 && rect.height > 0) sectorWrapRectCache = rect;
+    return rect;
+}
+
+// One paint per animation frame, using a cached box for the map.
+function updateSectorStarsParallaxFromMouse(event) {
+    if (!event) return;
+    sectorParallaxEvent = { clientX: event.clientX, clientY: event.clientY };
+    if (sectorParallaxFrame) return;
+    sectorParallaxFrame = requestAnimationFrame(() => {
+        sectorParallaxFrame = 0;
+        const e = sectorParallaxEvent;
+        sectorParallaxEvent = null;
+        const starsLayer = document.getElementById('sector-map-stars');
+        const rect = getSectorWrapRect();
+        if (!e || !starsLayer || !rect || !rect.width || !rect.height || isLyraMotionReduced()) return;
+        const relX = ((e.clientX - rect.left) / rect.width) - 0.5;
+        const relY = ((e.clientY - rect.top) / rect.height) - 0.5;
+        starsLayer.setAttribute('transform', `translate(${(-relX * 16).toFixed(2)} ${(-relY * 10).toFixed(2)})`);
+    });
 }
 
 function resetSectorStarsParallax() {
@@ -2555,13 +2990,14 @@ function bindSectorMapParallax() {
     const wrap = document.querySelector('#sector-map-modal .sector-map-wrap');
     if (!wrap || wrap.dataset.parallaxBound === '1') return;
     wrap.dataset.parallaxBound = '1';
-    wrap.addEventListener('mousemove', updateSectorStarsParallaxFromMouse);
+    wrap.addEventListener('mousemove', updateSectorStarsParallaxFromMouse, { passive: true });
     wrap.addEventListener('mouseleave', resetSectorStarsParallax);
 }
 
 function openSectorMap() {
     const modal = document.getElementById('sector-map-modal');
     if (!modal) return;
+    sectorWrapRectCache = null;
     renderSectorMap();
     bindSectorMapParallax();
     openModal(modal);

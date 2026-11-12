@@ -35,29 +35,44 @@ function handleMissionBriefingBackdrop(event) {
     if (event && event.target === document.getElementById('mission-briefing-modal')) closeMissionBriefing();
 }
 
+// Streak shown to the player: the progression code's getEffectiveStreak() when it exists
+// (it drops dead streaks), otherwise the stored count.
+function getDisplayStreakCount() {
+    if (typeof getEffectiveStreak === 'function') {
+        try { return Math.max(0, Number(getEffectiveStreak()) || 0); } catch (e) {}
+    }
+    return Math.max(0, Number(getStreakData().streak || 0) || 0);
+}
+
+// Admin rights come from the server's /api/me answer (user.isAdmin), never from a hard-coded name.
+function socialIsAdmin() {
+    return !!(currentUser && currentUser.isAdmin === true);
+}
+
 function renderLifetimeStatsModal() {
     const content = document.getElementById('lifetime-stats-content');
     if (!content) return;
     const lifetime = getLifetimeStatsSummary();
-    const streakCount = Math.max(0, Number(getStreakData().streak || 0) || 0);
+    const streakCount = getDisplayStreakCount();
     const xp = getTotalXP();
     const level = getLevel(xp);
     const achievements = getEarnedBadges().length;
     const lifetimeChallenges = getLifetimeChallengesCompleted();
     const avgWordsPerTest = lifetime.tests > 0 ? Math.round(lifetime.words / lifetime.tests) : 0;
+    const guestNote = currentUser ? '' : '<div class="profile-meta lifetime-guest-note">These totals are saved in this browser only. Log in to keep them.</div>';
     content.innerHTML = `
-        <div class="profile-section-title">Your All-Time Totals</div>
+        <div class="profile-section-title">Your all-time totals</div>${guestNote}
         <div class="profile-stats-grid">
             <div class="profile-stat">
-                <div class="profile-stat-label">Tests</div>
+                <div class="profile-stat-label">Runs</div>
                 <div class="profile-stat-value">${lifetime.tests.toLocaleString()}</div>
             </div>
             <div class="profile-stat">
-                <div class="profile-stat-label">Words Typed</div>
+                <div class="profile-stat-label">Words typed</div>
                 <div class="profile-stat-value">${lifetime.words.toLocaleString()}</div>
             </div>
             <div class="profile-stat">
-                <div class="profile-stat-label">Time Typed</div>
+                <div class="profile-stat-label">Time typed</div>
                 <div class="profile-stat-value profile-stat-value--sm">${escapeHtml(formatLifetimeDuration(lifetime.seconds))}</div>
             </div>
             <div class="profile-stat">
@@ -65,7 +80,7 @@ function renderLifetimeStatsModal() {
                 <div class="profile-stat-value">${lifetime.bestWpm.toLocaleString()}</div>
             </div>
             <div class="profile-stat">
-                <div class="profile-stat-label">Bible Tests</div>
+                <div class="profile-stat-label">Bible runs</div>
                 <div class="profile-stat-value">${lifetime.bibleTests.toLocaleString()}</div>
             </div>
             <div class="profile-stat">
@@ -73,7 +88,7 @@ function renderLifetimeStatsModal() {
                 <div class="profile-stat-value">${level}</div>
             </div>
             <div class="profile-stat">
-                <div class="profile-stat-label">Current Streak</div>
+                <div class="profile-stat-label">Current streak</div>
                 <div class="profile-stat-value">${streakCount.toLocaleString()}</div>
             </div>
             <div class="profile-stat">
@@ -85,7 +100,7 @@ function renderLifetimeStatsModal() {
                 <div class="profile-stat-value">${achievements.toLocaleString()}</div>
             </div>
             <div class="profile-stat">
-                <div class="profile-stat-label">Avg Words/Test</div>
+                <div class="profile-stat-label">Words per run</div>
                 <div class="profile-stat-value">${avgWordsPerTest.toLocaleString()}</div>
             </div>
         </div>
@@ -93,7 +108,6 @@ function renderLifetimeStatsModal() {
 }
 
 function openLifetimeStatsModal() {
-    if (!currentUser) return;
     const modal = document.getElementById('lifetime-stats-modal');
     if (!modal) return;
     renderLifetimeStatsModal();
@@ -201,7 +215,7 @@ function renderAdminUserDetail(user) {
 }
 
 async function loadAdminUsers() {
-    if (!isAdminCurrentUser()) return;
+    if (!socialIsAdmin()) return;
     const usersPane = document.getElementById('admin-users-list');
     if (usersPane) usersPane.innerHTML = '<div class="profile-loading">Loading players...</div>';
     setAdminNote('');
@@ -229,7 +243,7 @@ async function loadAdminUsers() {
 }
 
 async function selectAdminUser(userId, updateList = true) {
-    if (!isAdminCurrentUser()) return;
+    if (!socialIsAdmin()) return;
     adminSelectedUserId = String(userId || '');
     if (updateList) renderAdminUsersList();
     try {
@@ -242,8 +256,8 @@ async function selectAdminUser(userId, updateList = true) {
 }
 
 function openAdminPanel() {
-    if (!isAdminCurrentUser()) {
-        showUiMessage('Admin access denied.', 'error');
+    if (!socialIsAdmin()) {
+        showUiMessage('Only admin accounts can open this panel.', 'error');
         return;
     }
     const modal = document.getElementById('admin-modal');
@@ -263,7 +277,7 @@ function handleAdminBackdrop(event) {
 }
 
 async function applyAdminGrant() {
-    if (!isAdminCurrentUser() || !adminSelectedUserId) return;
+    if (!socialIsAdmin() || !adminSelectedUserId) return;
     const parseOptionalInt = (id, min = 0) => {
         const raw = String(document.getElementById(id)?.value || '').trim();
         if (!raw) return null;
@@ -292,7 +306,7 @@ async function applyAdminGrant() {
         setWeeklyCompleted !== null || setAchievements !== null
     );
     if (addXp <= 0 && addSkillPoints <= 0 && unlockRewards.length === 0 && !hasSetOps && !resetUsername && !resetPassword) {
-        setAdminNote('Enter at least one value to set/add, or adjust rewards.', true);
+        setAdminNote('Enter at least one value to set or add, or change a reward.', true);
         return;
     }
     const setRewards = {
@@ -317,9 +331,12 @@ async function applyAdminGrant() {
                 unlockRewards,
                 resetUsername: resetUsername || null,
                 resetPassword: resetPassword || null,
+                // Daily/weekly "set" fields apply to the admin's own calendar day and week.
+                clientDateKey: getTodayStr(),
+                clientWeekKey: getWeekKey(),
             }),
         });
-        setAdminNote('Admin changes applied successfully.');
+        setAdminNote('Changes saved.');
         if (currentUser && String(currentUser.id || '') === String(adminSelectedUserId)) {
             await hydrateProgressForCurrentUser();
             await refreshCloudProgress();
@@ -335,7 +352,7 @@ async function applyAdminGrant() {
 }
 
 async function adminDeleteSelectedUser() {
-    if (!isAdminCurrentUser() || !adminSelectedUserId) return;
+    if (!socialIsAdmin() || !adminSelectedUserId) return;
     const target = adminUsersCache.find((u) => String(u.id) === String(adminSelectedUserId));
     const uname = target && target.username ? String(target.username) : 'this user';
     const ok = window.confirm(`Delete account "${uname}" permanently? This cannot be undone.`);
@@ -361,7 +378,59 @@ function openSkills() {
     if (!modal) return;
     openModal(modal);
     renderSkillsModal();
+    renderShopOwnedSection();
+    watchShopForOwnedSection();
 }
+
+// "Owned" lives inside the shop now (the old Inventory modal is kept only for backwards compatibility).
+let shopOwnedObserver = null;
+function watchShopForOwnedSection() {
+    const content = document.getElementById('skills-content');
+    if (!content || shopOwnedObserver || typeof MutationObserver !== 'function') return;
+    shopOwnedObserver = new MutationObserver(() => renderShopOwnedSection());
+    shopOwnedObserver.observe(content, { childList: true });
+}
+
+function renderShopOwnedSection() {
+    const wrap = document.getElementById('shop-owned-section');
+    if (!wrap) return;
+    const owned = typeof getSkillsState === 'function' ? getSkillsState() : {};
+    const settings = typeof getRewardSettings === 'function' ? getRewardSettings() : {};
+    const rewards = [
+        { id: 'aura', name: 'Word Glow', desc: 'A glow around the word you are typing.' },
+        { id: 'nebulaTrail', name: 'Nebula Trail', desc: 'A colourful trail behind your cursor.' },
+        { id: 'soundscapes', name: 'Your Own Personal Universe', desc: 'Menu music theme.' },
+    ].filter((item) => !!owned[item.id]);
+    const packs = (Array.isArray(window.SHOP_KEY_SOUND_PACKS) ? window.SHOP_KEY_SOUND_PACKS : (typeof SHOP_KEY_SOUND_PACKS !== 'undefined' ? SHOP_KEY_SOUND_PACKS : []))
+        .filter((pack) => typeof isKeySoundPackUnlocked === 'function' && isKeySoundPackUnlocked(pack.id))
+        .map((pack) => ({ id: pack.id, name: pack.label, desc: pack.desc, equipped: (typeof keySoundPackName !== 'undefined') && keySoundPackName === pack.id }));
+    const total = rewards.length + packs.length;
+    if (total === 0) {
+        wrap.innerHTML = `<div class="profile-section-title">Owned</div><div class="inventory-empty">You do not own anything yet. Buy something above and it shows up here.</div>`;
+        return;
+    }
+    const rewardHtml = rewards.map((item) => {
+        const on = settings[item.id] !== false;
+        return `<div class="inventory-item shop-owned-item">
+            <div class="inventory-item-top">
+                <span class="inventory-item-name">${escapeHtml(item.name)}</span>
+                <button type="button" class="inventory-toggle ${on ? 'on' : ''}" onclick="toggleRewardFromInventory('${escapeHtml(item.id)}'); renderShopOwnedSection();" aria-pressed="${on ? 'true' : 'false'}">${on ? `Turn ${escapeHtml(item.name)} off` : `Turn ${escapeHtml(item.name)} on`}</button>
+            </div>
+            <div class="inventory-item-desc">${escapeHtml(item.desc)}</div>
+        </div>`;
+    }).join('');
+    const packHtml = packs.map((item) => `<div class="inventory-item shop-owned-item">
+            <div class="inventory-item-top">
+                <span class="inventory-item-name">${escapeHtml(item.name)}</span>
+                <button type="button" class="inventory-toggle ${item.equipped ? 'on' : ''}" onclick="equipKeySoundPackFromInventory('${escapeHtml(item.id)}'); renderShopOwnedSection();" ${item.equipped ? 'disabled' : ''}>${item.equipped ? 'In use' : 'Use this pack'}</button>
+            </div>
+            <div class="inventory-item-desc">${escapeHtml(item.desc)}</div>
+        </div>`).join('');
+    wrap.innerHTML = `
+        <div class="profile-section-title">Owned <span class="profile-section-sub">(${total})</span></div>
+        <div class="shop-owned-grid">${rewardHtml}${packHtml}</div>`;
+}
+window.renderShopOwnedSection = renderShopOwnedSection;
 
 function closeSkills() {
     const modal = document.getElementById('skills-modal');
@@ -416,7 +485,7 @@ function openAccountManagement() {
         el.disabled = !canManage;
     });
     if (!canManage) {
-        setAccountManageNote('Log in to manage username, password, and account deletion.', true);
+        setAccountManageNote('Log in to change your username or password, or to delete your account.', true);
     } else {
         setAccountManageNote('');
     }
@@ -452,7 +521,7 @@ function openDeleteAccountConfirm() {
     const pwInput = document.getElementById('delete-account-password-confirm');
     if (pwInput) pwInput.value = '';
     setDeleteAccountNote('');
-    desc.textContent = `Type "${currentUser.username}" and your password to confirm account deletion. This cannot be undone.`;
+    desc.textContent = `Type "${currentUser.username}" and your password to confirm. This deletes your account and cannot be undone.`;
     input.focus();
 }
 
@@ -479,9 +548,14 @@ async function updateAccountUsername() {
             method: 'PATCH',
             body: JSON.stringify({ username }),
         });
+        const oldName = currentUser && currentUser.username;
         currentUser = out.user;
         updateAuthUi();
-        setAccountManageNote('Username updated successfully.');
+        invalidateLeaderboardUserSummaryCache(oldName);
+        invalidateLeaderboardUserSummaryCache(currentUser && currentUser.username);
+        invalidateLeaderboardBoardCache();
+        refreshLeaderboard(true);
+        setAccountManageNote('Username changed.');
         if (input) input.value = '';
     } catch (e) {
         setAccountManageNote(e.message || 'Unable to update username.', true);
@@ -506,7 +580,7 @@ async function updateAccountPassword() {
             method: 'PATCH',
             body: JSON.stringify({ currentPassword, newPassword }),
         });
-        setAccountManageNote('Password updated successfully.');
+        setAccountManageNote('Password changed.');
         const cur = document.getElementById('account-current-password');
         const next = document.getElementById('account-new-password');
         const confirm = document.getElementById('account-new-password-confirm');
@@ -569,14 +643,20 @@ async function loadProfileData() {
     }
 }
 
+// Cloud and local copies of the same run carry slightly different timestamps (the server stamps
+// its own clock), so a run is a duplicate when mode, WPM, accuracy and time match within 120 s.
+const PROFILE_DEDUPE_WINDOW_MS = 120000;
 function mergeProfileScores(localScores = [], cloudScores = []) {
     const all = [];
-    const seen = new Set();
+    const byKey = new Map(); // mode|wpm|accuracy|time -> [dates]
     for (const row of [...(Array.isArray(cloudScores) ? cloudScores : []), ...(Array.isArray(localScores) ? localScores : [])]) {
         if (!row || typeof row !== 'object') continue;
-        const key = `${Number(row.date) || 0}|${String(row.mode || '')}|${Number(row.wpm) || 0}|${Number(row.accuracy) || 0}|${Number(row.time) || 0}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
+        const date = Number(row.date) || 0;
+        const key = `${String(row.mode || '')}|${Math.round(Number(row.wpm) || 0)}|${Math.round(Number(row.accuracy) || 0)}|${Math.round(Number(row.time) || 0)}`;
+        const seenDates = byKey.get(key) || [];
+        if (seenDates.some((d) => Math.abs(d - date) <= PROFILE_DEDUPE_WINDOW_MS)) continue;
+        seenDates.push(date);
+        byKey.set(key, seenDates);
         all.push(row);
     }
     all.sort((a, b) => (a.date || 0) - (b.date || 0));
@@ -600,10 +680,12 @@ function renderProfile(scores) {
     const secs = totalSec % 60;
     const timeStr = `${String(hrs).padStart(2,'0')}:${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
 
+    const createdAtMs = Number(currentUser && currentUser.createdAt) || 0;
     const oldestDate = totalTests > 0 ? new Date(Math.min(...scores.map(s => s.date || Date.now()))) : null;
-    const joinStr = oldestDate
-        ? oldestDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-        : 'No tests yet';
+    const joinDate = createdAtMs > 0 ? new Date(createdAtMs) : oldestDate;
+    const joinStr = joinDate
+        ? joinDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+        : 'the beta';
 
     const modes = ['quotes', 'words', 'words30'];
     const modeLabels = { quotes: 'Quotes', words: 'Random Words', words30: 'Words 30s' };
@@ -615,7 +697,7 @@ function renderProfile(scores) {
 
     const safeDisplayName = (String(displayName || '').trim() || 'Guest');
     const initial = safeDisplayName.charAt(0).toUpperCase();
-    const streakCount = Math.max(0, Number(getStreakData().streak || 0) || 0);
+    const streakCount = getDisplayStreakCount();
     const streakMultiplier = getXPMultiplier(streakCount);
     const streakText = `${streakCount}-day streak${streakCount >= 3 ? ' 🔥' : ''}`;
     const xpBoostText = streakMultiplier > 1
@@ -630,13 +712,13 @@ function renderProfile(scores) {
                     <div class="profile-name">${escapeHtml(safeDisplayName)}</div>
                     <div class="profile-streak-inline">${escapeHtml(streakText + xpBoostText)}</div>
                 </div>
-                <div class="profile-meta">${isGuest ? 'Local session (not synced)' : `Member since ${escapeHtml(joinStr)}`}</div>
+                <div class="profile-meta">${isGuest ? 'Guest. Runs are saved in this browser only.' : `Member since ${escapeHtml(joinStr)}`}</div>
             </div>
         </div>
 
         <div class="profile-stats-grid">
             <div class="profile-stat">
-                <div class="profile-stat-label">Tests</div>
+                <div class="profile-stat-label">Runs</div>
                 <div class="profile-stat-value">${totalTests}</div>
             </div>
             <div class="profile-stat">
@@ -648,11 +730,11 @@ function renderProfile(scores) {
                 <div class="profile-stat-value">${avgWpm}</div>
             </div>
             <div class="profile-stat">
-                <div class="profile-stat-label">Avg Acc</div>
+                <div class="profile-stat-label">Avg accuracy</div>
                 <div class="profile-stat-value">${avgAcc}%</div>
             </div>
             <div class="profile-stat">
-                <div class="profile-stat-label">Time Typing</div>
+                <div class="profile-stat-label">Time typed</div>
                 <div class="profile-stat-value profile-stat-value--sm">${escapeHtml(timeStr)}</div>
             </div>
         </div>
@@ -661,12 +743,12 @@ function renderProfile(scores) {
         <div class="profile-best-grid">
             ${modes.map(m => {
                 const b = bestByMode[m];
-                const errStr = (b && b.rawWpm != null) ? ` &nbsp;·&nbsp; ${Math.max(0, Math.round((b.rawWpm||0) - (b.wpm||0)))} err/min` : '';
+                const errStr = (b && b.rawWpm != null) ? `<span class="profile-best-err">${Math.max(0, Math.round((b.rawWpm||0) - (b.wpm||0)))} WPM lost to errors</span>` : '';
                 return `<div class="profile-best-card">
                     <div class="profile-best-mode">${modeLabels[m]}</div>
                     ${b
                         ? `<div class="profile-best-wpm">${Number(b.wpm) || 0} WPM</div>
-                           <div class="profile-best-acc">${Number(b.accuracy) || 0}% acc${errStr}</div>`
+                           <div class="profile-best-acc">${Number(b.accuracy) || 0}% accuracy${errStr}</div>`
                         : `<div class="profile-best-empty">—</div>`}
                 </div>`;
             }).join('')}
@@ -687,12 +769,12 @@ function renderProfile(scores) {
         </div>
 
         ${totalTests >= 2 ? `
-        <div class="profile-section-title">WPM Progress <span class="profile-section-sub">(raw + rolling avg, last ${Math.min(totalTests, 50)} tests)</span></div>
+        <div class="profile-section-title">WPM over time <span class="profile-section-sub">(each run and the rolling average, last ${Math.min(totalTests, 50)} runs)</span></div>
         <canvas id="profile-trend-chart" class="profile-chart-canvas" aria-hidden="true"></canvas>
         ` : ''}
 
         ${totalTests >= 5 ? `
-        <div class="profile-section-title">WPM distribution</div>
+        <div class="profile-section-title">How often you hit each speed</div>
         <canvas id="profile-hist-chart" class="profile-chart-canvas" aria-hidden="true"></canvas>
         ` : ''}
     `;
@@ -719,7 +801,7 @@ function renderProfileExtra() {
     const level = getLevel(xp);
     const xpInLevel = Math.round(getLevelProgress(xp) * XP_PER_LEVEL);
     const skillPoints = getSkillPoints();
-    const streak = getStreakData().streak || 0;
+    const streak = getDisplayStreakCount();
     const earnedBadges = getEarnedBadges(); // [{id, earnedAt}]
 
     // Level tier progression display
@@ -749,15 +831,13 @@ function renderProfileExtra() {
                     `<span class="skill-point-badge" id="skill-point-badge">Aether Crystals: ${skillPoints}</span>` +
                     '<span class="skill-info-wrap">' +
                         '<span class="skill-info-icon" aria-hidden="true">i</span>' +
-                        '<span class="skill-info-tooltip">Earn Aether Crystals by levelling up! You can cash them in at the shop for fun rewards!</span>' +
+                        '<span class="skill-info-tooltip">You get one Aether Crystal each time you level up. Spend them in the shop.</span>' +
                     '</span>' +
                 '</div>' +
             '</div>' +
         '</div>' +
         `<div class="level-tier-list">${tierHtml}</div>` +
-        '<div class="profile-shop-row"><button class="profile-shop-btn" onclick="openSkills()"><span class="profile-shop-icon" aria-hidden="true">🛒</span><span>Shop</span></button></div>' +
-        '<div class="profile-shop-row"><button class="profile-inventory-btn" onclick="openInventory()"><span class="profile-shop-icon" aria-hidden="true">🎒</span><span>Inventory</span></button></div>' +
-        '<div class="profile-shop-row"><button class="profile-briefing-btn" onclick="openMissionBriefing()">Mission Briefing</button></div>';
+        '<div class="profile-shop-row"><button class="profile-shop-btn" onclick="openSkills()"><span class="profile-shop-icon" aria-hidden="true">🛒</span><span>Shop and owned items</span></button></div>';
 
     // Achievements — show all, earned = bright, unearned = dimmed with requirement
     const allBadgesHtml = BADGE_DEFS.map(def => {
@@ -1088,15 +1168,17 @@ function formatLifetimeDuration(totalSeconds) {
     const days = Math.floor(seconds / 86400);
     const hours = Math.floor((seconds % 86400) / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
     const parts = [];
     if (days > 0) parts.push(`${days}d`);
     if (hours > 0 || parts.length) parts.push(`${hours}h`);
-    parts.push(`${minutes}m`);
+    if (minutes > 0 || parts.length) parts.push(`${minutes}m`);
+    parts.push(`${secs}s`);
     return parts.join(' ');
 }
 
 function clearHistory() {
-    if (!confirm('Clear all history?')) return;
+    if (!confirm('Clear your recent results list? Your lifetime totals are kept.')) return;
     playSound(SFX.clearHistory);
     try { localStorage.removeItem(HISTORY_KEY); } catch (e) {}
     const section = document.getElementById('history-section');
@@ -1133,7 +1215,7 @@ function renderHistory() {
     section.style.display = 'block';
 
     const bestWpm = Math.max(...history.map(h => h.wpm));
-    bestEl.innerHTML = `<span class="history-best-icon" aria-hidden="true">🏆</span><span class="history-best-label">Personal Best</span><span class="history-best-value">${bestWpm} WPM</span>`;
+    bestEl.innerHTML = `<span class="history-best-icon" aria-hidden="true">🏆</span><span class="history-best-label">Personal best</span><span class="history-best-value">${bestWpm} WPM</span>`;
 
     listEl.innerHTML = '';
     history.slice(0, 10).forEach(entry => {
@@ -1146,7 +1228,7 @@ function renderHistory() {
         row.className = 'history-row' + (isBest ? ' is-best' : '');
         row.innerHTML = `
             <span class="h-date">${escapeHtml(dateStr)}</span>
-            <span class="h-mode">${escapeHtml(entry.mode)}</span>
+            <span class="h-mode">${escapeHtml(typeof lbModeLabel === 'function' ? lbModeLabel(entry.mode) : entry.mode)}</span>
             <span class="h-wpm">${Number(entry.wpm)} WPM</span>
             <span class="h-acc">${Number(entry.accuracy)}%</span>
             <span class="h-text" title="${escapeHtml(entry.text)}">${escapeHtml(snip)}</span>

@@ -5,6 +5,7 @@ output
 data
 *.toml
 *.md
+*.log
 worker.js
 server.js
 functions
@@ -14,8 +15,11 @@ package-lock.json
 .assetsignore
 .claude
 .wranglerignore
+.env
+.env.*
 tests
 test-results
+playwright-report
 docker
 Dockerfile
 playwright.config.js

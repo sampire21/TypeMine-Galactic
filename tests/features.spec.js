@@ -75,10 +75,9 @@ test.describe('Features (desktop)', () => {
     const text = await completeRun(page);
     expect(text.length).toBeGreaterThan(10);
     await expect(overlay(page)).toBeVisible();
-    const wpm = parseFloat((await page.locator('#final-wpm').textContent()) || '0');
-    expect(wpm).toBeGreaterThan(0);
-    const acc = parseFloat((await page.locator('#final-accuracy').textContent()) || '0');
-    expect(acc).toBe(100);
+    // The result numbers count up when the card opens, so wait for the final values.
+    await expect.poll(async () => parseFloat((await page.locator('#final-wpm').textContent()) || '0')).toBeGreaterThan(0);
+    await expect(page.locator('#final-accuracy')).toHaveText('100%', { timeout: 5000 });
     await expect(page.locator('#run-analysis-container')).not.toBeEmpty();
     expect((await page.locator('#run-analysis-container').innerHTML()).trim().length).toBeGreaterThan(20);
   });
@@ -91,14 +90,16 @@ test.describe('Features (desktop)', () => {
     await page.keyboard.press('Backspace');
     await typeAll(page, text);
     await expect(overlay(page)).toHaveClass(/show/, { timeout: 10000 });
+    await expect.poll(async () => parseFloat((await page.locator('#final-accuracy').textContent()) || '100'), { timeout: 5000 }).toBeLessThan(100);
+    await page.waitForTimeout(1200); // let the count-up settle before reading the final value
     const acc = parseFloat((await page.locator('#final-accuracy').textContent()) || '100');
     expect(acc).toBeLessThan(100);
   });
 
   test('adaptive mode renders a drill and accepts clean typing', async ({ page }) => {
-    await page.locator('.mode-tab', { hasText: 'Adaptive' }).click();
+    await page.locator('.mode-tab', { hasText: 'Weak keys' }).click();
     await expect(page.locator('.mode-tab.active')).toHaveAttribute('data-mode', 'adaptive');
-    await expect(page.locator('#quote-source')).toContainText(/Adaptive/i);
+    await expect(page.locator('#quote-source')).toContainText(/weak[- ]key/i);
     const text = await readTarget(page);
     expect(text.length).toBeGreaterThan(20);
     await focusTyping(page);

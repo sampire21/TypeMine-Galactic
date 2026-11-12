@@ -1,10 +1,24 @@
-FROM nginx:alpine
-COPY index.html /usr/share/nginx/html/index.html
-COPY bible-verses.js /usr/share/nginx/html/bible-verses.js
-COPY sw.js /usr/share/nginx/html/sw.js
-COPY manifest.webmanifest /usr/share/nginx/html/manifest.webmanifest
-COPY Favicon.png /usr/share/nginx/html/Favicon.png
-COPY typemine-galactic-logo.png /usr/share/nginx/html/typemine-galactic-logo.png
-COPY icons/ /usr/share/nginx/html/icons/
-COPY "Sound Effects/" "/usr/share/nginx/html/Sound Effects/"
-EXPOSE 80
+# Runs the Node adapter (server.js), which serves the site and the same /api
+# handlers the Cloudflare Worker uses. Accounts and scores are saved in /app/data.
+FROM node:22-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
+
+# Server side
+COPY package.json server.js worker.js ./
+COPY functions/ ./functions/
+
+# Site
+COPY index.html styles.css sw.js manifest.webmanifest bible-verses.js Favicon.png typemine-galactic-logo.png ./
+COPY js/ ./js/
+COPY css/ ./css/
+COPY icons/ ./icons/
+COPY assets/ ./assets/
+COPY ["Sound Effects/", "./Sound Effects/"]
+
+RUN mkdir -p /app/data && chown -R node:node /app
+USER node
+VOLUME ["/app/data"]
+EXPOSE 3000
+CMD ["node", "server.js"]

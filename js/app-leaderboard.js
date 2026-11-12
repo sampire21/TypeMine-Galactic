@@ -1,3 +1,79 @@
+// ── Leaderboard: cloud/local detection, board cache, level tiers, player tooltip ──
+const LB_BOARD_CACHE_TTL_MS = 30000;
+const lbBoardCache = new Map(); // "tab|mode" -> { ts, data }
+let lbActiveMode = 'all';
+let socialCloudModeCache = null; // null = not probed yet
+let socialCloudModeProbe = null;
+let lbTooltipAnchorEl = null;
+let lbTooltipHandlersBound = false;
+
+// Level tiers: one colour and title for every 10 levels. Names for the first five
+// match getLevelName() in the progression code.
+const LB_LEVEL_TIERS = [
+    { max: 10, name: 'Scribe' },
+    { max: 20, name: 'Calligrapher' },
+    { max: 30, name: 'Typist' },
+    { max: 40, name: 'Operator' },
+    { max: 50, name: 'Cyber-Runner' },
+    { max: 60, name: 'Pilot' },
+    { max: 70, name: 'Navigator' },
+    { max: 80, name: 'Commander' },
+    { max: 90, name: 'Admiral' },
+    { max: Infinity, name: 'Legend' },
+];
+
+function getLeaderboardLevelTier(level) {
+    const lv = Math.max(1, Math.floor(Number(level) || 1));
+    const idx = Math.min(LB_LEVEL_TIERS.length - 1, Math.floor((lv - 1) / 10));
+    const tier = LB_LEVEL_TIERS[idx];
+    return { index: idx + 1, name: tier.name, cssClass: `lb-tier-${idx + 1}`, level: lv };
+}
+
+function lbLevelTitle(level) {
+    const tier = getLeaderboardLevelTier(level);
+    return `Level ${tier.level}, ${tier.name}`;
+}
+
+// Cloud vs local mode. The backend exposes window.isCloudMode() once it boots; until then
+// we probe /api/health once and treat a 404 as "no backend here".
+function socialIsCloudMode() {
+    if (typeof window.isCloudMode === 'function') {
+        try { return !!window.isCloudMode(); } catch (e) {}
+    }
+    if (socialCloudModeCache !== null) return socialCloudModeCache;
+    return !localApiFallbackActive;
+}
+
+async function socialDetectCloudMode() {
+    if (typeof window.isCloudMode === 'function') {
+        try { return !!window.isCloudMode(); } catch (e) {}
+    }
+    if (socialCloudModeCache !== null) return socialCloudModeCache;
+    if (socialCloudModeProbe) return socialCloudModeProbe;
+    socialCloudModeProbe = (async () => {
+        const isWebContext = location.protocol === 'http:' || location.protocol === 'https:';
+        if (!isWebContext) {
+            socialCloudModeCache = false;
+            return false;
+        }
+        try {
+            const res = await fetchWithTimeout('/api/health', { method: 'GET' }, 5000);
+            socialCloudModeCache = res.status !== 404;
+            return socialCloudModeCache;
+        } catch (e) {
+            // Network trouble is not proof that there is no backend; keep trying cloud.
+            return !localApiFallbackActive;
+        } finally {
+            socialCloudModeProbe = null;
+        }
+    })();
+    return socialCloudModeProbe;
+}
+
+function invalidateLeaderboardBoardCache() {
+    lbBoardCache.clear();
+}
+
 function normalizeSummaryUsername(value) {
     return String(value || '').trim().toLowerCase();
 }
@@ -21,9 +97,10 @@ function hideLeaderboardUserTooltip(immediate = false) {
         tooltip.setAttribute('aria-hidden', 'true');
         tooltip.innerHTML = '';
         lbTooltipActiveUsername = '';
+        lbTooltipAnchorEl = null;
     };
     if (immediate) doHide();
-    else lbTooltipHideTimer = setTimeout(doHide, 70);
+    else lbTooltipHideTimer = setTimeout(doHide, 120);
 }
 
 function positionLeaderboardUserTooltip(clientX, clientY) {
@@ -42,27 +119,57 @@ function positionLeaderboardUserTooltip(clientX, clientY) {
     tooltip.style.top = `${top}px`;
 }
 
+// Anchor the tooltip under an element (keyboard focus and touch taps have no useful pointer position).
+function positionLeaderboardUserTooltipAt(anchorEl) {
+    if (!anchorEl || typeof anchorEl.getBoundingClientRect !== 'function') return;
+    const rect = anchorEl.getBoundingClientRect();
+    positionLeaderboardUserTooltip(rect.left, rect.bottom - 4);
+}
+
+function repositionLeaderboardUserTooltip() {
+    if (lbTooltipAnchorEl) positionLeaderboardUserTooltipAt(lbTooltipAnchorEl);
+}
+
 function badgeDisplayNameById(id) {
     const def = BADGE_DEFS.find((badge) => badge.id === id);
     return def ? `${def.icon} ${def.name}` : id;
 }
 
+function lbStatOrDash(value, suffix = '') {
+    if (value === null || value === undefined || !Number.isFinite(Number(value))) return '—';
+    return `${Math.round(Number(value)).toLocaleString()}${suffix}`;
+}
+
 function renderLeaderboardUserTooltip(summary) {
     const tooltip = document.getElementById('lb-user-tooltip');
     if (!tooltip) return;
+    const username = String(summary && summary.username || 'Unknown');
     const badges = Array.isArray(summary && summary.badgeIds) ? summary.badgeIds : [];
     const badgeNames = badges.map(badgeDisplayNameById);
     const badgesText = badgeNames.length ? badgeNames.join(', ') : 'None yet';
     const level = Math.max(1, Number(summary && summary.level) || 1);
+    const tier = getLeaderboardLevelTier(level);
     const pbWpm = Math.max(0, Number(summary && summary.personalBestWpm) || 0);
-    const communityTotal = Math.max(0, Number(summary && summary.communityContributionTotal) || 0);
+    const weeklyBest = Number(summary && summary.weeklyBestWpm);
+    const wordsThisWeek = Number(summary && summary.wordsThisWeek);
+    const isSelf = !!(currentUser && normalizeSummaryUsername(currentUser.username) === normalizeSummaryUsername(username));
+    const compareHtml = (!isSelf)
+        ? `<button type="button" class="lb-tooltip-compare" data-username="${escapeHtml(username)}">Compare with me</button>`
+        : '';
     tooltip.innerHTML = `
-        <div class="lb-user-tooltip-title">${escapeHtml(String(summary && summary.username || 'Unknown'))}</div>
-        <div class="lb-user-tooltip-line"><strong>Level:</strong> ${level}</div>
-        <div class="lb-user-tooltip-line"><strong>Achievements:</strong> ${escapeHtml(badgesText)}</div>
-        <div class="lb-user-tooltip-line"><strong>Total Community Damage:</strong> ${communityTotal.toLocaleString()}</div>
-        <div class="lb-user-tooltip-line"><strong>Personal Best WPM:</strong> ${pbWpm}</div>
+        <div class="lb-user-tooltip-title ${tier.cssClass}">${escapeHtml(username)}</div>
+        <div class="lb-user-tooltip-line"><strong>Level:</strong> ${level} (${escapeHtml(tier.name)})</div>
+        <div class="lb-user-tooltip-line"><strong>Best:</strong> ${pbWpm} WPM${Number.isFinite(weeklyBest) && weeklyBest > 0 ? ` <strong>This week:</strong> ${Math.round(weeklyBest)} WPM` : ''}</div>
+        ${Number.isFinite(wordsThisWeek) ? `<div class="lb-user-tooltip-line"><strong>Words this week:</strong> ${Math.round(wordsThisWeek).toLocaleString()}</div>` : ''}
+        <div class="lb-user-tooltip-line"><strong>Badges:</strong> ${escapeHtml(badgesText)}</div>
+        ${compareHtml}
     `;
+}
+
+function lbNumberOrNull(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
 }
 
 async function fetchLeaderboardUserSummary(username) {
@@ -74,11 +181,16 @@ async function fetchLeaderboardUserSummary(username) {
     if (lbUserSummaryInFlight.has(key)) return lbUserSummaryInFlight.get(key);
     const req = (async () => {
         let out = null;
-        try {
-            out = await apiFetchCloudFirst(`/api/user-summary?username=${encodeURIComponent(key)}`);
-        } catch (e) {
-            if (!shouldAllowLocalFallback(e)) throw e;
-            out = await localApiFetch(`/api/user-summary?username=${encodeURIComponent(key)}`, {}, buildAuthHeaders({}));
+        const url = `/api/user-summary?username=${encodeURIComponent(key)}`;
+        if (socialIsCloudMode()) {
+            try {
+                out = await apiFetchCloudFirst(url);
+            } catch (e) {
+                if (!shouldAllowLocalFallback(e)) throw e;
+                out = await localApiFetch(url, {}, buildAuthHeaders({}));
+            }
+        } else {
+            out = await localApiFetch(url, {}, buildAuthHeaders({}));
         }
         const data = {
             username: String(out && out.username ? out.username : username),
@@ -86,9 +198,15 @@ async function fetchLeaderboardUserSummary(username) {
             level: Math.max(1, Number(out && out.level) || 1),
             personalBestWpm: Math.max(0, Number(out && out.personalBestWpm) || 0),
             communityContributionTotal: Math.max(0, Number(out && out.communityContributionTotal) || 0),
+            // Head-to-head fields. The backend may not send all of them yet; missing ones show as a dash.
+            weeklyBestWpm: lbNumberOrNull(out && out.weeklyBestWpm),
+            averageWpm: lbNumberOrNull(out && (out.averageWpm ?? out.avgWpm)),
+            runs: lbNumberOrNull(out && (out.runs ?? out.tests ?? out.totalTests)),
+            averageAccuracy: lbNumberOrNull(out && (out.averageAccuracy ?? out.avgAccuracy ?? out.accuracy)),
+            streak: lbNumberOrNull(out && (out.streak ?? out.streakDays)),
+            wordsThisWeek: lbNumberOrNull(out && (out.wordsThisWeek ?? out.weeklyWords)),
         };
-        // For the currently logged-in user, prefer the local badge state immediately
-        // so newly unlocked achievements appear in hover without waiting for cache TTL.
+        // For the logged-in player, merge local badge state so fresh unlocks show at once.
         const currentUsernameKey = normalizeSummaryUsername(currentUser && currentUser.username);
         if (currentUsernameKey && currentUsernameKey === key) {
             const localBadgeIds = getEarnedBadges()
@@ -112,10 +230,48 @@ function showLeaderboardUserTooltipLoading(username) {
     if (!tooltip) return;
     tooltip.innerHTML = `
         <div class="lb-user-tooltip-title">${escapeHtml(username)}</div>
-        <div class="lb-user-tooltip-line">Loading profile...</div>
+        <div class="lb-user-tooltip-line">Loading stats...</div>
     `;
     tooltip.classList.add('show');
     tooltip.setAttribute('aria-hidden', 'false');
+}
+
+// Show the tooltip for a username element. `point` is {x, y} for mouse hover; omit it to anchor under the element.
+function showLeaderboardUserTooltipFor(userEl, point = null) {
+    if (!userEl) return;
+    const username = String(userEl.dataset.username || '').trim();
+    if (!username) return;
+    if (lbTooltipHideTimer) {
+        clearTimeout(lbTooltipHideTimer);
+        lbTooltipHideTimer = null;
+    }
+    lbTooltipActiveUsername = username;
+    lbTooltipAnchorEl = point ? null : userEl;
+    const token = ++lbTooltipRequestToken;
+    const place = () => {
+        if (point) positionLeaderboardUserTooltip(point.x, point.y);
+        else positionLeaderboardUserTooltipAt(userEl);
+    };
+    showLeaderboardUserTooltipLoading(username);
+    place();
+    fetchLeaderboardUserSummary(username).then((summary) => {
+        if (token !== lbTooltipRequestToken || lbTooltipActiveUsername !== username) return;
+        renderLeaderboardUserTooltip(summary);
+        place();
+    }).catch(() => {
+        if (token !== lbTooltipRequestToken || lbTooltipActiveUsername !== username) return;
+        const tooltip = document.getElementById('lb-user-tooltip');
+        if (!tooltip) return;
+        tooltip.innerHTML = `
+            <div class="lb-user-tooltip-title">${escapeHtml(username)}</div>
+            <div class="lb-user-tooltip-line">Stats are not available right now.</div>
+        `;
+        place();
+    });
+}
+
+function lbIsCoarsePointer() {
+    try { return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches); } catch (e) { return false; }
 }
 
 function setupLeaderboardHoverHandlers() {
@@ -126,36 +282,15 @@ function setupLeaderboardHoverHandlers() {
         if (!eventTarget || typeof eventTarget.closest !== 'function') return null;
         return eventTarget.closest('.lb-user-hover[data-username]');
     };
+    // Mouse hover follows the pointer.
     listEl.addEventListener('mouseover', (event) => {
         const userEl = findTarget(event.target);
         if (!userEl || !listEl.contains(userEl)) return;
-        const username = String(userEl.dataset.username || '').trim();
-        if (!username) return;
-        if (lbTooltipHideTimer) {
-            clearTimeout(lbTooltipHideTimer);
-            lbTooltipHideTimer = null;
-        }
-        lbTooltipActiveUsername = username;
-        const token = ++lbTooltipRequestToken;
-        showLeaderboardUserTooltipLoading(username);
-        positionLeaderboardUserTooltip(event.clientX, event.clientY);
-        fetchLeaderboardUserSummary(username).then((summary) => {
-            if (token !== lbTooltipRequestToken || lbTooltipActiveUsername !== username) return;
-            renderLeaderboardUserTooltip(summary);
-            positionLeaderboardUserTooltip(event.clientX, event.clientY);
-        }).catch(() => {
-            if (token !== lbTooltipRequestToken || lbTooltipActiveUsername !== username) return;
-            const tooltip = document.getElementById('lb-user-tooltip');
-            if (!tooltip) return;
-            tooltip.innerHTML = `
-                <div class="lb-user-tooltip-title">${escapeHtml(username)}</div>
-                <div class="lb-user-tooltip-line">Profile details unavailable right now.</div>
-            `;
-            positionLeaderboardUserTooltip(event.clientX, event.clientY);
-        });
+        if (lbIsCoarsePointer()) return;
+        showLeaderboardUserTooltipFor(userEl, { x: event.clientX, y: event.clientY });
     });
     listEl.addEventListener('mousemove', (event) => {
-        if (!lbTooltipActiveUsername) return;
+        if (!lbTooltipActiveUsername || lbTooltipAnchorEl) return;
         positionLeaderboardUserTooltip(event.clientX, event.clientY);
     });
     listEl.addEventListener('mouseout', (event) => {
@@ -163,10 +298,77 @@ function setupLeaderboardHoverHandlers() {
         if (!fromEl) return;
         const toEl = findTarget(event.relatedTarget);
         if (toEl && toEl !== fromEl) return;
+        if (lbTooltipAnchorEl === fromEl && document.activeElement === fromEl) return; // keep for keyboard focus
         hideLeaderboardUserTooltip(false);
     });
-    window.addEventListener('scroll', () => hideLeaderboardUserTooltip(true), true);
+    // Keyboard focus anchors the tooltip under the name.
+    listEl.addEventListener('focusin', (event) => {
+        const userEl = findTarget(event.target);
+        if (!userEl) return;
+        showLeaderboardUserTooltipFor(userEl);
+    });
+    listEl.addEventListener('focusout', (event) => {
+        const userEl = findTarget(event.target);
+        if (!userEl) return;
+        const next = event.relatedTarget;
+        if (next && typeof next.closest === 'function' && next.closest('#lb-user-tooltip')) return;
+        hideLeaderboardUserTooltip(false);
+    });
+    // Click or tap: on touch screens a tap shows the card (with a Compare button);
+    // with a mouse the card is already showing, so a click opens the head-to-head view.
+    listEl.addEventListener('click', (event) => {
+        const userEl = findTarget(event.target);
+        if (!userEl) return;
+        event.preventDefault();
+        const username = String(userEl.dataset.username || '').trim();
+        if (!username) return;
+        const showing = lbTooltipActiveUsername === username && document.getElementById('lb-user-tooltip')?.classList.contains('show');
+        if (lbIsCoarsePointer() || !showing) {
+            showLeaderboardUserTooltipFor(userEl);
+            return;
+        }
+        if (typeof openHeadToHead === 'function') openHeadToHead(username);
+    });
+    listEl.addEventListener('keydown', (event) => {
+        const userEl = findTarget(event.target);
+        if (!userEl) return;
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            if (typeof openHeadToHead === 'function') openHeadToHead(String(userEl.dataset.username || '').trim());
+        } else if (event.key === 'Escape') {
+            hideLeaderboardUserTooltip(true);
+        }
+    });
+    window.addEventListener('scroll', () => {
+        if (lbTooltipAnchorEl) repositionLeaderboardUserTooltip();
+        else hideLeaderboardUserTooltip(true);
+    }, true);
+    window.addEventListener('resize', repositionLeaderboardUserTooltip);
+    setupLeaderboardTooltipElementHandlers();
     leaderboardHoverBound = true;
+}
+
+function setupLeaderboardTooltipElementHandlers() {
+    if (lbTooltipHandlersBound) return;
+    const tooltip = document.getElementById('lb-user-tooltip');
+    if (!tooltip) return;
+    tooltip.addEventListener('mouseenter', () => {
+        if (lbTooltipHideTimer) {
+            clearTimeout(lbTooltipHideTimer);
+            lbTooltipHideTimer = null;
+        }
+    });
+    tooltip.addEventListener('mouseleave', () => hideLeaderboardUserTooltip(false));
+    tooltip.addEventListener('click', (event) => {
+        const btn = event.target && typeof event.target.closest === 'function'
+            ? event.target.closest('.lb-tooltip-compare[data-username]')
+            : null;
+        if (!btn) return;
+        const username = String(btn.dataset.username || '').trim();
+        hideLeaderboardUserTooltip(true);
+        if (username && typeof openHeadToHead === 'function') openHeadToHead(username);
+    });
+    lbTooltipHandlersBound = true;
 }
 
 function updateInstallAppButtonVisibility() {
@@ -185,7 +387,7 @@ async function handleInstallAppClick() {
         await promptEvent.prompt();
         const choice = await promptEvent.userChoice;
         if (choice && choice.outcome === 'accepted') {
-            showUiMessage('App installed successfully!', 'success', 2200, 'top-left');
+            showUiMessage('App installed.', 'success', 2200, 'top-left');
         }
     } catch (e) {
         // Ignore: install prompt is browser-controlled and may be canceled.
@@ -223,8 +425,29 @@ function setLbTab(tab) {
     lbActiveTab = tab;
     document.querySelectorAll('.lb-tab').forEach(b => {
         b.classList.toggle('active', b.dataset.tab === tab);
+        b.setAttribute('aria-selected', b.dataset.tab === tab ? 'true' : 'false');
     });
     refreshLeaderboard();
+}
+
+function setLbMode(mode) {
+    const safe = ['all', 'quotes', 'words', 'words30'].includes(mode) ? mode : 'all';
+    lbActiveMode = safe;
+    updateLeaderboardModeFilterUi();
+    refreshLeaderboard();
+}
+window.setLbMode = setLbMode;
+
+function updateLeaderboardModeFilterUi() {
+    const wrap = document.getElementById('lb-mode-filter');
+    if (!wrap) return;
+    // The mode filter only applies to score boards (not the team goal list).
+    wrap.style.display = lbActiveTab === 'community' ? 'none' : '';
+    wrap.querySelectorAll('.lb-mode-btn').forEach((btn) => {
+        const on = btn.dataset.mode === lbActiveMode;
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
 }
 
 const LYRA_WORDS_PER_ASTEROID = 30;

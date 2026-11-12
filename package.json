@@ -1,17 +1,23 @@
 {
   "name": "sampires-glorious-typing-test-main",
   "version": "1.0.0",
-  "description": "",
+  "description": "TypeMine Galactic typing game: static site plus /api handlers that run on Cloudflare Workers or the local Node adapter.",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "PORT=${PORT:-3001} node server.js",
+    "test": "npm run test:unit && npx playwright test --project=desktop-chrome",
+    "test:unit": "for f in tests/*.test.js; do node \"$f\" || exit 1; done",
+    "test:backend": "node tests/backend.test.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
-  "dependencies": {
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
     "@playwright/test": "^1.58.2",
     "playwright": "^1.58.2"
   }

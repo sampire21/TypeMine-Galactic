@@ -4,4 +4,16 @@ services:
     container_name: typing-test
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "8080:3000"
+    environment:
+      # Required: a long random string. Generate one with: openssl rand -hex 32
+      TYPING_TEST_TOKEN_SECRET: "${TYPING_TEST_TOKEN_SECRET:?set TYPING_TEST_TOKEN_SECRET in your shell or a .env file}"
+      # Optional: the username that gets the admin panel.
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-}"
+      # Set to 1 when a reverse proxy (nginx proxy manager) sits in front of this container.
+      TRUST_PROXY: "1"
+    volumes:
+      - typing_data:/app/data
+
+volumes:
+  typing_data:

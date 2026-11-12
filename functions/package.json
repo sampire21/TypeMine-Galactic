@@ -1,0 +1,5 @@
+{
+  "type": "module",
+  "private": true,
+  "description": "Marks functions/ as ES modules so the Node adapter (server.js) can import the same /api handlers the Cloudflare Worker uses."
+}

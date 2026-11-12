@@ -1,24 +1,55 @@
 import {
   json,
   getJson,
-  leaderboardKey,
+  getAuthUser,
   normalizeMode,
   hasStorage,
+  storageMissing,
   getWeekKeyUtc,
   communityContributionKey,
+  getBoardRows,
+  friendsKey,
 } from './_lib.js';
+
+function publicRow(row) {
+  return {
+    userId: row.userId,
+    username: row.username,
+    wpm: row.wpm,
+    rawWpm: row.rawWpm,
+    accuracy: row.accuracy,
+    consistency: row.consistency,
+    time: row.time,
+    mode: row.mode,
+    date: row.date,
+    level: row.level,
+  };
+}
+
+// Keeps one row per user (their best across the selected modes) so the board is a list of people.
+function bestPerUser(rows) {
+  const seen = new Set();
+  const out = [];
+  for (const row of rows) {
+    if (seen.has(row.userId)) continue;
+    seen.add(row.userId);
+    out.push(row);
+  }
+  return out;
+}
 
 export async function onRequestGet(context) {
   const { request, env } = context;
-  if (!hasStorage(env)) return json({ error: 'Server storage not configured (TYPING_APP KV binding missing).' }, 500);
+  if (!hasStorage(env)) return storageMissing();
   const url = new URL(request.url);
-  const limit = Math.max(1, Math.min(1000, Number(url.searchParams.get('limit') || 20)));
-  const community = url.searchParams.get('community') === '1' || (url.searchParams.get('tab') || '').trim() === 'community';
-  const modeParam = (url.searchParams.get('mode') || '').trim();
-  const mode = modeParam ? normalizeMode(modeParam) : '';
+  const limit = Math.max(1, Math.min(1000, Number(url.searchParams.get('limit') || 100)));
+  const tabParam = (url.searchParams.get('tab') || '').trim().toLowerCase();
+  const community = url.searchParams.get('community') === '1' || tabParam === 'community';
+  const modeParam = (url.searchParams.get('mode') || '').trim().toLowerCase();
+  const mode = modeParam && modeParam !== 'all' ? normalizeMode(modeParam) : 'all';
+  const weekKey = getWeekKeyUtc();
 
   if (community) {
-    const weekKey = getWeekKeyUtc();
     const contribKey = communityContributionKey(weekKey);
     const state = await getJson(env, contribKey, { week: weekKey, entries: {} });
     const entries = (state && typeof state.entries === 'object' && !Array.isArray(state.entries))
@@ -33,34 +64,35 @@ export async function onRequestGet(context) {
       .filter((row) => row.damage > 0)
       .sort((a, b) => b.damage - a.damage || a.username.localeCompare(b.username))
       .slice(0, limit);
-    return json({ week: weekKey, contributions }, 200);
+    return json({ week: weekKey, weekKey, contributions }, 200);
   }
 
-  const allRows = await getJson(env, leaderboardKey(), []);
-  const bestByUserMode = new Map();
-  for (const row of allRows) {
-    if (mode && row.mode !== mode) continue;
-    const key = `${row.userId || row.username}::${row.mode}`;
-    const prev = bestByUserMode.get(key);
-    const better =
-      !prev ||
-      (row.wpm || 0) > (prev.wpm || 0) ||
-      ((row.wpm || 0) === (prev.wpm || 0) && (row.accuracy || 0) > (prev.accuracy || 0)) ||
-      ((row.wpm || 0) === (prev.wpm || 0) && (row.accuracy || 0) === (prev.accuracy || 0) && (row.date || 0) > (prev.date || 0));
-    if (better) bestByUserMode.set(key, row);
-  }
-  const leaderboard = [...bestByUserMode.values()]
-    .sort((a, b) => b.wpm - a.wpm || b.accuracy - a.accuracy || b.date - a.date)
-    .slice(0, limit)
-    .map((row) => ({
-      username: row.username,
-      mode: row.mode,
-      wpm: row.wpm,
-      accuracy: row.accuracy,
-      rawWpm: row.rawWpm,
-      time: row.time,
-      date: row.date,
-    }));
+  const tab = tabParam === 'weekly' ? 'weekly' : tabParam === 'friends' ? 'friends' : 'alltime';
+  const me = await getAuthUser(request, env);
+  if (tab === 'friends' && !me) return json({ error: 'Log in to see your friends board' }, 401);
 
-  return json({ leaderboard }, 200);
+  const allRows = bestPerUser(await getBoardRows(env, tab === 'weekly' ? 'weekly' : 'alltime', mode, weekKey));
+  let rows = allRows;
+  if (tab === 'friends') {
+    const ids = await getJson(env, friendsKey(me.id), []);
+    const allowed = new Set([String(me.id), ...(Array.isArray(ids) ? ids.map(String) : [])]);
+    rows = allRows.filter((row) => allowed.has(String(row.userId)));
+  }
+
+  let yourRank = null;
+  if (me) {
+    const idx = rows.findIndex((row) => String(row.userId) === String(me.id));
+    if (idx >= 0) yourRank = { rank: idx + 1, wpm: rows[idx].wpm, total: rows.length };
+  }
+
+  const out = rows.slice(0, limit).map(publicRow);
+  return json({
+    rows: out,
+    leaderboard: out, // older client code reads this name
+    tab,
+    mode,
+    weekKey,
+    total: rows.length,
+    yourRank,
+  }, 200);
 }

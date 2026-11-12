@@ -12,6 +12,8 @@
 
     let stats = { keys: {}, bigrams: {}, total: 0 };
     let saveTimer = null;
+    // Keys a results card asked us to drill next (overrides the weak-key pick until cleared).
+    let focusKeys = [];
 
     function storage() {
         try { return global.localStorage || null; } catch (e) { return null; }
@@ -131,8 +133,8 @@
         let eligible = pool.filter(w => w.length <= maxLen);
         if (eligible.length < 20) eligible = pool;
 
-        const keys = getWeakKeys(6);
-        const bigrams = getWeakBigrams(6);
+        const keys = focusKeys.length ? focusKeys.slice(0, 6) : getWeakKeys(6);
+        const bigrams = focusKeys.length ? [] : getWeakBigrams(6);
         const targets = keys.length + bigrams.length;
         const out = [];
         let weighted = [];
@@ -140,7 +142,7 @@
             weighted = eligible.map(w => {
                 let s = 0;
                 bigrams.forEach(b => { if (w.indexOf(b) !== -1) s += 3; });
-                keys.forEach(k => { if (w.indexOf(k) !== -1) s += 1; });
+                keys.forEach(k => { if (w.indexOf(k) !== -1) s += focusKeys.length ? 3 : 1; });
                 return { w, s };
             }).filter(x => x.s > 0);
         }
@@ -175,8 +177,30 @@
         return out;
     }
 
+    function setFocusKeys(keys) {
+        const list = Array.isArray(keys) ? keys : (typeof keys === 'string' ? keys.split('') : []);
+        const seen = new Set();
+        focusKeys = [];
+        list.forEach((k) => {
+            const c = String(k == null ? '' : k).toLowerCase().trim();
+            if (/^[a-z]$/.test(c) && !seen.has(c)) { seen.add(c); focusKeys.push(c); }
+        });
+        return focusKeys.slice();
+    }
+
+    function getFocusKeys() { return focusKeys.slice(); }
+
+    // One plain sentence for the line above the drill text.
+    function getStatusLine() {
+        if (focusKeys.length) return 'Weak-key drill: ' + focusKeys.join(', ') + ' (picked from your last run)';
+        const weak = getWeakKeys(3);
+        if (weak.length) return 'Weak-key drill: ' + weak.join(', ') + ' (your slowest or most-missed letters)';
+        return 'Type a few runs first so we can find your weak keys';
+    }
+
     function reset() {
         stats = { keys: {}, bigrams: {}, total: 0 };
+        focusKeys = [];
         if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
         const ls = storage();
         try { if (ls) ls.removeItem(STORAGE_KEY); } catch (e) { /* ignore */ }
@@ -187,5 +211,7 @@
     global.AdaptivePractice = {
         recordKeystroke, commitRun, getWeakKeys, getWeakBigrams,
         generateDrill, getKeyHeatmap, reset,
+        setFocusKeys, getFocusKeys, getStatusLine,
     };
+    if (typeof module !== 'undefined' && module.exports) module.exports = global.AdaptivePractice;
 })(typeof window !== 'undefined' ? window : globalThis);

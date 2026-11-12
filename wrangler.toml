@@ -1,3 +1,5 @@
+# Secrets (TOKEN_SECRET, optional ADMIN_USERNAME / ADMIN_USER_ID) are NOT set here.
+# Set them in the Cloudflare dashboard; see "Secrets to set before deploy" in CLOUDFLARE_SETUP.md.
 name = "sampires-glorious-typing-test"
 main = "worker.js"
 compatibility_date = "2025-09-27"

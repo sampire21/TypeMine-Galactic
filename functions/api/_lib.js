@@ -3,6 +3,29 @@ export const REFRESH_SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 30;
 const SESSION_COOKIE_NAME = 'sampire_session';
 const REFRESH_COOKIE_NAME = 'sampire_refresh';
 
+export const MAX_JSON_BODY_BYTES = 64 * 1024;
+export const WEEK_SECONDS = 7 * 24 * 60 * 60;
+export const WEEKLY_KEY_TTL_SECONDS = 5 * WEEK_SECONDS;
+export const XP_PER_LEVEL = 500;
+export const MAX_LEVEL = 100;
+export const KNOWN_MODES = ['quotes', 'words', 'words30', 'words15', 'words60', 'words120'];
+export const TIMED_MODE_SECONDS = { words30: 30, words15: 15, words60: 60, words120: 120 };
+
+export const BADGE_IDS = [
+  'sonic_boom', 'speed_demon', 'flawless', 'midnight_oil', 'streak_master', 'triple_crown',
+  'founder', 'human_lectionary', 'marathon', 'consistent_climber', 'above_average', 'aura', 'soundscapes',
+];
+export const DAILY_IDS = ['nobackspace', 'sprint', 'perfectionist', 'daily_quotes_5', 'daily_words_5', 'daily_words30_5'];
+export const WEEKLY_IDS = ['marathon', 'consistent_climber', 'rival_week', 'above_average'];
+
+export class HttpError extends Error {
+  constructor(status, message, code = '') {
+    super(message);
+    this.status = status;
+    this.code = code;
+  }
+}
+
 export function json(data, status = 200, extraHeaders = null) {
   const headers = new Headers({
     'content-type': 'application/json; charset=utf-8',
@@ -23,9 +46,22 @@ export function json(data, status = 200, extraHeaders = null) {
   });
 }
 
-export async function readJson(request) {
+// Reads a JSON body of at most maxBytes. Throws HttpError(413) when the body is too big,
+// which worker.js turns into a 413 response. Invalid or empty JSON becomes {}.
+export async function readJson(request, maxBytes = MAX_JSON_BODY_BYTES) {
+  const declared = Number(request.headers.get('content-length') || 0);
+  if (declared > maxBytes) throw new HttpError(413, 'Request body too large', 'PAYLOAD_TOO_LARGE');
+  let text = '';
   try {
-    return await request.json();
+    text = await request.text();
+  } catch {
+    return {};
+  }
+  if (text.length > maxBytes) throw new HttpError(413, 'Request body too large', 'PAYLOAD_TOO_LARGE');
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
   } catch {
     return {};
   }
@@ -42,6 +78,16 @@ export function validateUsername(usernameRaw) {
     return { ok: false, error: 'Username must be 3-24 chars: a-z, 0-9, _' };
   }
   return { ok: true, username, normalized };
+}
+
+export const PASSWORD_MIN_LENGTH = 6;
+export const PASSWORD_MAX_LENGTH = 128;
+
+export function validatePassword(passwordRaw) {
+  const password = String(passwordRaw == null ? '' : passwordRaw);
+  if (password.length < PASSWORD_MIN_LENGTH) return { ok: false, error: `Password must be at least ${PASSWORD_MIN_LENGTH} characters` };
+  if (password.length > PASSWORD_MAX_LENGTH) return { ok: false, error: `Password must be at most ${PASSWORD_MAX_LENGTH} characters` };
+  return { ok: true, password };
 }
 
 function utf8Bytes(value) {
@@ -97,29 +143,14 @@ export function constantTimeEqual(a, b) {
 }
 
 export function getSecret(env) {
-  if (!env.TOKEN_SECRET) throw new Error('TOKEN_SECRET environment variable is not set. Set it in your Cloudflare Worker settings.');
-  return env.TOKEN_SECRET;
+  const secret = String((env && env.TOKEN_SECRET) || '');
+  if (!secret) throw new Error('TOKEN_SECRET environment variable is not set. Set it in your Cloudflare Worker settings.');
+  if (secret.length < 16) throw new Error('TOKEN_SECRET is too short. Use at least 16 characters (32 or more is better).');
+  return secret;
 }
 
 export function hasStorage(env) {
   return !!(env && env.TYPING_APP);
-}
-
-export async function looksLikeEmptyAuthNamespace(env) {
-  if (!hasStorage(env)) return false;
-  try {
-    const marker = await env.TYPING_APP.get('meta:storage-ready');
-    if (marker) return false;
-    const list = await env.TYPING_APP.list({ prefix: 'user:', limit: 1 });
-    return !(list && Array.isArray(list.keys) && list.keys.length > 0);
-  } catch {
-    return false;
-  }
-}
-
-export async function markStorageReady(env) {
-  if (!hasStorage(env)) return;
-  await env.TYPING_APP.put('meta:storage-ready', JSON.stringify({ v: 1, updatedAt: Date.now() }));
 }
 
 export async function hashPassword(password, saltBase64 = null) {
@@ -141,6 +172,13 @@ export async function hashPassword(password, saltBase64 = null) {
     salt: bytesToBase64(salt),
     hash: bytesToBase64(new Uint8Array(bits)),
   };
+}
+
+// A fixed salt used only to burn the same CPU time when the username does not exist,
+// so a login attempt takes the same time whether or not the account is real.
+const DUMMY_SALT_BASE64 = 'AAAAAAAAAAAAAAAAAAAAAA==';
+export async function burnPasswordHashTime(password) {
+  try { await hashPassword(String(password || ''), DUMMY_SALT_BASE64); } catch {}
 }
 
 async function hmacSign(input, secret) {
@@ -178,15 +216,21 @@ export async function verifyToken(token, secret) {
   }
 }
 
-export function publicUser(user) {
-  return { id: user.id, username: user.username, createdAt: Number(user.createdAt) || null };
+export function publicUser(user, env = null) {
+  return {
+    id: user.id,
+    username: user.username,
+    createdAt: Number(user.createdAt) || null,
+    isAdmin: env ? isAdminUser(user, env) : false,
+  };
 }
 
 export async function getAuthUser(request, env) {
   const payload = await verifyAccessTokenFromRequest(request, env);
   if (!payload || !payload.uid) return null;
+  let session = null;
   if (payload.sid && hasStorage(env)) {
-    const session = await getJson(env, authSessionKey(payload.sid), null);
+    session = await getJson(env, authSessionKey(payload.sid), null);
     if (!session || session.revoked) return null;
     if (String(session.uid || '') !== String(payload.uid || '')) return null;
     if (Number(session.refreshExp) > 0 && Date.now() > Number(session.refreshExp)) return null;
@@ -195,7 +239,6 @@ export async function getAuthUser(request, env) {
   if (!user) return null;
   // Password change/reset sets sessionsValidAfter; older sessions are no longer valid.
   if (payload.sid && Number(user.sessionsValidAfter) > 0) {
-    const session = await getJson(env, authSessionKey(payload.sid), null);
     if (!session || Number(session.createdAt) < Number(user.sessionsValidAfter)) return null;
   }
   return user;
@@ -229,17 +272,64 @@ export async function getJson(env, key, fallback = null) {
   }
 }
 
-export async function putJson(env, key, value) {
+export async function putJson(env, key, value, options = null) {
   if (!hasStorage(env)) return;
-  await env.TYPING_APP.put(key, JSON.stringify(value));
+  if (options) await env.TYPING_APP.put(key, JSON.stringify(value), options);
+  else await env.TYPING_APP.put(key, JSON.stringify(value));
 }
 
+export async function deleteKey(env, key) {
+  if (!hasStorage(env)) return;
+  try { await env.TYPING_APP.delete(key); } catch {}
+}
+
+// ---------------------------------------------------------------------------
+// KV key layout (see CLOUDFLARE_SETUP.md for the plain-English version)
+// ---------------------------------------------------------------------------
 export function userScoreKey(userId) {
   return `scores:user:${userId}`;
 }
 
-export function leaderboardKey() {
-  return 'leaderboard:v1';
+export function progressKey(userId) {
+  return `progress:user:${userId}`;
+}
+
+export function lastSeenKey(userId) {
+  return `seen:v1:${userId}`;
+}
+
+export function allTimeBestKey(mode, userId) {
+  return `lb:v1:${mode}:${userId}`;
+}
+
+export function allTimeBestPrefix(mode) {
+  return `lb:v1:${mode}:`;
+}
+
+export function weeklyBestKey(weekKey, mode, userId) {
+  return `lbw:v1:${weekKey}:${mode}:${userId}`;
+}
+
+export function weeklyBestPrefix(weekKey, mode) {
+  return `lbw:v1:${weekKey}:${mode}:`;
+}
+
+export function flaggedScoreKey(scoreId) {
+  return `flagged:v1:${scoreId}`;
+}
+
+export const FLAGGED_PREFIX = 'flagged:v1:';
+
+export function friendsKey(userId) {
+  return `friends:${userId}`;
+}
+
+export function contributionTotalKey(userId) {
+  return `contrib-total:v1:${userId}`;
+}
+
+export function xpDayKey(userId, dateKey) {
+  return `xpday:v1:${userId}:${dateKey}`;
 }
 
 export function formatDateKeyUtc(dateObj) {
@@ -258,6 +348,177 @@ export function getWeekKeyUtc(baseDateMs = Date.now()) {
 
 export function communityContributionKey(weekKey) {
   return `community-contrib:v1:${String(weekKey || getWeekKeyUtc())}`;
+}
+
+// ---------------------------------------------------------------------------
+// "Last seen" without rewriting the user record. Written at most once an hour.
+// ---------------------------------------------------------------------------
+const LAST_SEEN_WRITE_INTERVAL_MS = 60 * 60 * 1000;
+const lastSeenMemory = new Map();
+
+export async function touchLastSeen(env, userId, nowMs = Date.now()) {
+  if (!hasStorage(env) || !userId) return;
+  const now = Number(nowMs) || Date.now();
+  const remembered = Number(lastSeenMemory.get(userId)) || 0;
+  if (now - remembered < LAST_SEEN_WRITE_INTERVAL_MS) return;
+  const stored = await getJson(env, lastSeenKey(userId), null);
+  const storedAt = Number(stored && stored.t) || 0;
+  if (now - storedAt < LAST_SEEN_WRITE_INTERVAL_MS) {
+    lastSeenMemory.set(userId, storedAt);
+    return;
+  }
+  await putJson(env, lastSeenKey(userId), { t: now }, { expirationTtl: 60 * 60 * 24 * 30 });
+  lastSeenMemory.set(userId, now);
+}
+
+export async function getLastSeenAt(env, user, progressPayload = null) {
+  const stored = await getJson(env, lastSeenKey(user && user.id), null);
+  return Math.max(
+    Number(user && user.lastSeenAt) || 0,
+    Number(user && user.lastLoginAt) || 0,
+    Number(stored && stored.t) || 0,
+    Number(progressPayload && progressPayload.updatedAt) || 0
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Progress helpers shared by several handlers
+// ---------------------------------------------------------------------------
+export function parseJsonSafe(raw, fallback) {
+  try {
+    const parsed = JSON.parse(raw || '');
+    return parsed == null ? fallback : parsed;
+  } catch {
+    return fallback;
+  }
+}
+
+export function progressOf(progressPayload) {
+  return (progressPayload && progressPayload.progress && typeof progressPayload.progress === 'object' && !Array.isArray(progressPayload.progress))
+    ? progressPayload.progress
+    : {};
+}
+
+export function xpOf(progress) {
+  return Math.max(0, parseInt((progress && progress['sampire-xp']) || '0', 10) || 0);
+}
+
+export function levelFromXp(xp) {
+  return Math.min(MAX_LEVEL, Math.floor((Number(xp) || 0) / XP_PER_LEVEL) + 1);
+}
+
+export function streakOf(progress) {
+  const streak = parseJsonSafe(progress && progress['sampire-streak'] || '{}', {});
+  return Math.max(0, Math.floor(Number(streak && streak.streak) || 0));
+}
+
+// Reads daily completions in both shapes: days[key] = [ids] (client) and days[key] = { completions: [ids] } (old admin).
+export function dailyCompletionsForDay(dailyObj, dayKey) {
+  if (!dailyObj || typeof dailyObj !== 'object') return [];
+  const days = dailyObj.days && typeof dailyObj.days === 'object' ? dailyObj.days : {};
+  const row = days[dayKey];
+  if (Array.isArray(row)) return row.map(String);
+  if (row && Array.isArray(row.completions)) return row.completions.map(String);
+  return [];
+}
+
+export function dailyCompletionsTotal(dailyObj) {
+  if (!dailyObj || typeof dailyObj !== 'object') return 0;
+  if (Array.isArray(dailyObj.completions)) return dailyObj.completions.length;
+  const days = dailyObj.days && typeof dailyObj.days === 'object' ? dailyObj.days : {};
+  return Object.keys(days).reduce((sum, key) => sum + dailyCompletionsForDay(dailyObj, key).length, 0);
+}
+
+export function dailyCompletionsLatestDay(dailyObj) {
+  if (!dailyObj || typeof dailyObj !== 'object') return 0;
+  if (Array.isArray(dailyObj.completions)) return dailyObj.completions.length;
+  const days = dailyObj.days && typeof dailyObj.days === 'object' ? dailyObj.days : {};
+  const keys = Object.keys(days).sort();
+  if (!keys.length) return 0;
+  return dailyCompletionsForDay(dailyObj, keys[keys.length - 1]).length;
+}
+
+// ---------------------------------------------------------------------------
+// Score rows and leaderboards
+// ---------------------------------------------------------------------------
+export function compactScoreRow(row) {
+  return {
+    id: String(row.id || ''),
+    userId: String(row.userId || ''),
+    username: String(row.username || ''),
+    wpm: Number(row.wpm) || 0,
+    rawWpm: Number(row.rawWpm) || 0,
+    accuracy: Number(row.accuracy) || 0,
+    consistency: Number(row.consistency) || 0,
+    time: Number(row.time) || 0,
+    mode: String(row.mode || 'quotes'),
+    date: Number(row.date) || 0,
+    level: Math.max(1, Math.floor(Number(row.level) || 1)),
+    flagged: !!row.flagged,
+  };
+}
+
+export function isBetterScore(candidate, baseline) {
+  if (!baseline) return true;
+  if ((candidate.wpm || 0) > (baseline.wpm || 0)) return true;
+  if ((candidate.wpm || 0) < (baseline.wpm || 0)) return false;
+  if ((candidate.accuracy || 0) > (baseline.accuracy || 0)) return true;
+  if ((candidate.accuracy || 0) < (baseline.accuracy || 0)) return false;
+  // Tie: the earlier run keeps its place.
+  return (candidate.date || 0) < (baseline.date || 0);
+}
+
+export function sortBoardRows(rows) {
+  return rows.sort((a, b) => (b.wpm - a.wpm) || (b.accuracy - a.accuracy) || (a.date - b.date) || a.username.localeCompare(b.username));
+}
+
+// Writes the best-row key. The compact row is also stored as KV metadata so list() returns
+// everything in one call and the leaderboard never has to get() each key.
+export async function putBestRow(env, key, row, options = null) {
+  const compact = compactScoreRow(row);
+  const opts = { metadata: compact, ...(options || {}) };
+  await env.TYPING_APP.put(key, JSON.stringify(compact), opts);
+}
+
+export async function listBestRows(env, prefix) {
+  const rows = [];
+  let cursor;
+  do {
+    const page = await env.TYPING_APP.list({ prefix, cursor, limit: 1000 });
+    for (const entry of (page && page.keys) || []) {
+      const name = String(entry && entry.name || '');
+      if (!name) continue;
+      let row = entry && entry.metadata && typeof entry.metadata === 'object' ? entry.metadata : null;
+      if (!row) row = await getJson(env, name, null);
+      if (!row || !row.userId) continue;
+      rows.push(compactScoreRow(row));
+    }
+    cursor = page && !page.list_complete ? page.cursor : undefined;
+  } while (cursor);
+  return rows;
+}
+
+// Leaderboards are rebuilt from the per-user keys and cached inside this isolate for 30 s.
+const BOARD_CACHE_TTL_MS = 30 * 1000;
+const boardCache = new Map();
+
+export async function getBoardRows(env, tab, mode, weekKey = getWeekKeyUtc()) {
+  const modes = mode && mode !== 'all' ? [mode] : KNOWN_MODES;
+  const cacheKey = `${tab}:${weekKey}:${modes.join(',')}`;
+  const cached = boardCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < BOARD_CACHE_TTL_MS) return cached.rows;
+  let rows = [];
+  for (const m of modes) {
+    const prefix = tab === 'weekly' ? weeklyBestPrefix(weekKey, m) : allTimeBestPrefix(m);
+    rows = rows.concat(await listBestRows(env, prefix));
+  }
+  rows = sortBoardRows(rows.filter((row) => !row.flagged));
+  boardCache.set(cacheKey, { at: Date.now(), rows });
+  return rows;
+}
+
+export function invalidateBoardCache() {
+  boardCache.clear();
 }
 
 export function createAccessSessionPayload(userId, sessionId) {
@@ -402,6 +663,13 @@ export function clearRefreshSessionCookie(request) {
   return parts.join('; ');
 }
 
+export function sessionCookieHeaders(request, tokenSet) {
+  const headers = new Headers();
+  headers.append('set-cookie', buildAccessSessionCookie(request, tokenSet.accessToken));
+  headers.append('set-cookie', buildRefreshSessionCookie(request, tokenSet.refreshToken));
+  return headers;
+}
+
 export function authSessionKey(sessionId) {
   return `auth-session:${String(sessionId || '')}`;
 }
@@ -415,6 +683,8 @@ export async function createAuthSession(env, userId, nowMs = Date.now()) {
     sid,
     uid: String(userId || ''),
     refreshJti,
+    prevRefreshJti: '',
+    prevRefreshJtiUntil: 0,
     refreshExp,
     createdAt: now,
     lastSeenAt: now,
@@ -450,7 +720,7 @@ export async function mintSessionTokens(env, userId, secret) {
 
 export function normalizeMode(mode) {
   const value = String(mode || 'quotes').trim().toLowerCase();
-  if (value === 'words' || value === 'words30' || value === 'quotes') return value;
+  if (KNOWN_MODES.includes(value)) return value;
   return 'quotes';
 }
 
@@ -469,8 +739,8 @@ export function safeRateKeyPart(value, fallback = 'unknown') {
   return out.replace(/[^a-z0-9._:-]/g, '_').slice(0, 120);
 }
 
-export async function incrementRateLimit(env, key, windowSec, nowMs = Date.now()) {
-  if (!hasStorage(env)) return { count: 1, retryAfterSec: windowSec, resetAt: nowMs + (windowSec * 1000) };
+export async function incrementRateLimit(env, key, windowSec, nowMs = Date.now(), amount = 1) {
+  if (!hasStorage(env)) return { count: amount, retryAfterSec: windowSec, resetAt: nowMs + (windowSec * 1000) };
   const now = Number(nowMs) || Date.now();
   const safeWindowSec = Math.max(1, Math.floor(Number(windowSec) || 1));
   const raw = await env.TYPING_APP.get(key);
@@ -488,8 +758,74 @@ export async function incrementRateLimit(env, key, windowSec, nowMs = Date.now()
       // Ignore parse errors and reset the window below.
     }
   }
-  count += 1;
+  count += Math.max(1, Math.floor(Number(amount) || 1));
   const ttl = Math.max(1, Math.ceil((resetAt - now) / 1000));
   await env.TYPING_APP.put(key, JSON.stringify({ count, resetAt }), { expirationTtl: ttl });
   return { count, retryAfterSec: ttl, resetAt };
+}
+
+export function rateLimited(message, retryAfterSec) {
+  return json({ error: message, code: 'RATE_LIMITED', retryAfter: retryAfterSec }, 429);
+}
+
+export function storageMissing() {
+  return json({ error: 'Server storage not configured (TYPING_APP KV binding missing).' }, 500);
+}
+
+// Rewrites a user's display name on every row that carries it (used by rename, self or admin).
+export async function propagateUsername(env, userId, username) {
+  const scores = await getJson(env, userScoreKey(userId), []);
+  if (Array.isArray(scores) && scores.length) {
+    let changed = false;
+    for (const row of scores) {
+      if (row && row.username !== username) { row.username = username; changed = true; }
+    }
+    if (changed) await putJson(env, userScoreKey(userId), scores);
+  }
+  const weekKey = getWeekKeyUtc();
+  for (const mode of KNOWN_MODES) {
+    const atKey = allTimeBestKey(mode, userId);
+    const atRow = await getJson(env, atKey, null);
+    if (atRow && atRow.username !== username) await putBestRow(env, atKey, { ...atRow, username });
+    const wkKey = weeklyBestKey(weekKey, mode, userId);
+    const wkRow = await getJson(env, wkKey, null);
+    if (wkRow && wkRow.username !== username) await putBestRow(env, wkKey, { ...wkRow, username }, { expirationTtl: WEEKLY_KEY_TTL_SECONDS });
+  }
+  const contribKey = communityContributionKey(weekKey);
+  const contrib = await getJson(env, contribKey, null);
+  const entryId = `user:${userId}`;
+  if (contrib && contrib.entries && contrib.entries[entryId] && contrib.entries[entryId].username !== username) {
+    contrib.entries[entryId].username = username;
+    await putJson(env, contribKey, contrib, { expirationTtl: WEEKLY_KEY_TTL_SECONDS });
+  }
+  invalidateBoardCache();
+}
+
+// Removes every key that belongs to a user (self delete or admin delete).
+export async function purgeUserData(env, user) {
+  const userId = String(user.id || '');
+  const norm = normalizeUsername(user.usernameNorm || user.username || '');
+  await deleteKey(env, `userByName:${norm}`);
+  await deleteKey(env, `user:${userId}`);
+  await deleteKey(env, userScoreKey(userId));
+  await deleteKey(env, progressKey(userId));
+  await deleteKey(env, friendsKey(userId));
+  await deleteKey(env, contributionTotalKey(userId));
+  await deleteKey(env, lastSeenKey(userId));
+  const weekKey = getWeekKeyUtc();
+  for (const mode of KNOWN_MODES) {
+    await deleteKey(env, allTimeBestKey(mode, userId));
+    await deleteKey(env, weeklyBestKey(weekKey, mode, userId));
+  }
+  const contribKey = communityContributionKey(weekKey);
+  const contrib = await getJson(env, contribKey, null);
+  if (contrib && contrib.entries && contrib.entries[`user:${userId}`]) {
+    delete contrib.entries[`user:${userId}`];
+    await putJson(env, contribKey, contrib, { expirationTtl: WEEKLY_KEY_TTL_SECONDS });
+  }
+  for (const prefix of [`xpday:v1:${userId}:`]) {
+    const page = await env.TYPING_APP.list({ prefix, limit: 1000 });
+    for (const entry of (page && page.keys) || []) await deleteKey(env, entry.name);
+  }
+  invalidateBoardCache();
 }

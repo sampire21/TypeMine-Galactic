@@ -2,19 +2,23 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="color-scheme" content="dark">
     <meta name="theme-color" content="#7c6ff7">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="TypeMine Galactic">
     <title>TypeMine Galactic</title>
-    <link rel="icon" type="image/png" href="Favicon.png">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="icon" type="image/png" sizes="64x64" href="Favicon.png">
+    <link rel="preload" as="image" href="typemine-galactic-logo.webp" type="image/webp">
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=Ubuntu:wght@400;500;700&family=Ubuntu+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Ubuntu:wght@400;500;700&family=Ubuntu+Mono:wght@400;700&display=swap">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Ubuntu:wght@400;500;700&family=Ubuntu+Mono:wght@400;700&display=swap" media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Ubuntu:wght@400;500;700&family=Ubuntu+Mono:wght@400;700&display=swap"></noscript>
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="css/engine.css">
     <link rel="stylesheet" href="css/progression.css">
@@ -28,83 +32,22 @@
     <svg class="entry-splash-stars" id="entry-splash-stars" viewBox="0 0 1200 720" preserveAspectRatio="none" aria-hidden="true"></svg>
     <div class="entry-splash-card" role="dialog" aria-modal="true" aria-labelledby="entry-splash-title">
         <div class="entry-splash-main">
-            <div class="entry-logo-wrap" onclick="handleSplashScreenClick(event)">
-                <img class="entry-logo-image" src="typemine-galactic-logo.png" alt="TypeMine Galactic logo" onerror="this.style.display='none';const f=document.getElementById('entry-logo-fallback');if(f)f.style.display='grid';">
+            <div class="entry-logo-wrap">
+                <picture>
+                    <source srcset="typemine-galactic-logo.webp" type="image/webp">
+                    <img class="entry-logo-image" src="typemine-galactic-logo.png" width="1002" height="251" alt="TypeMine Galactic logo" fetchpriority="high" onerror="this.style.display='none';const f=document.getElementById('entry-logo-fallback');if(f)f.style.display='grid';">
+                </picture>
                 <div class="entry-logo-fallback" id="entry-logo-fallback" aria-hidden="true">TMG</div>
             </div>
-            <div class="entry-splash-stage" onclick="handleSplashScreenClick(event)">
-                <div class="entry-splash-prompt" id="entry-splash-title">Tap or press any key to continue</div>
+            <div class="entry-splash-stage">
+                <p class="entry-splash-prompt" id="entry-splash-title">Press any key or tap Start to begin</p>
                 <div class="entry-splash-options">
+                    <button type="button" class="btn btn-primary btn-lg entry-splash-start entry-splash-guest" id="entry-guest-btn" onclick="continueAsGuestFromSplash()">Start typing</button>
                     <div class="entry-splash-actions">
-                        <button type="button" class="entry-splash-btn" id="entry-login-btn" onclick="openLoginFromSplash()">Login</button>
-                        <button type="button" class="entry-splash-btn signup" onclick="openSignupFromSplash()">Sign Up</button>
+                        <button type="button" class="btn btn-ghost entry-splash-btn" id="entry-login-btn" onclick="openLoginFromSplash()">Log in</button>
+                        <button type="button" class="btn btn-ghost entry-splash-btn signup" id="entry-signup-btn" onclick="openSignupFromSplash()">Create account</button>
                     </div>
-                    <button type="button" class="entry-splash-guest" id="entry-guest-btn" onclick="continueAsGuestFromSplash()">Continue as Guest</button>
-                </div>
-            </div>
-        </div>
-        <div class="entry-guide-panel" id="entry-guide-panel" aria-hidden="true">
-            <div class="entry-guide-shell">
-                <div class="entry-guide-kicker">Welcome to TypeMine Galactic!</div>
-                <div class="entry-guide-title" id="entry-guide-title" data-text="WELCOME, PILOT">WELCOME, PILOT</div>
-                <div class="entry-guide-route-note" id="entry-guide-route-note">Initializing guidance uplink...</div>
-                <div class="entry-guide-body">
-                    <div class="entry-guide-copy">
-                        <p>
-                            TypeMine Galactic turns every typing session into an asteroid mining operation. Mine asteroids, harvest Aether Crystals, and spend them in the
-                            <span class="entry-guide-shop-link" tabindex="0">shop
-                                <span class="entry-guide-shop-tooltip" aria-hidden="true">
-                                    <span class="entry-guide-shop-tooltip-title">Reward Preview</span>
-                                    <span class="entry-guide-shop-tooltip-list">
-                                        <span class="entry-guide-shop-reward"><strong>Your Own Personal Universe</strong>Ambient soundscape unlocks for your command deck.</span>
-                                        <span class="entry-guide-shop-reward"><strong>Word Glow</strong>Premium cosmetic aura that sharpens active text visibility.</span>
-                                        <span class="entry-guide-shop-reward"><strong>Keyboard Sound Packs</strong>Mechanical and themed keystroke sets for every run.</span>
-                                    </span>
-                                </span>
-                            </span>
-                            to expand your loadout.
-                        </p>
-                        <div class="entry-guide-mode-grid">
-                            <div class="entry-guide-mode-card">
-                                <div class="entry-guide-mode-name">Random Words</div>
-                                <div class="entry-guide-mode-desc">Randomly generated strings for raw rhythm building and clean speed reps.</div>
-                            </div>
-                            <div class="entry-guide-mode-card">
-                                <div class="entry-guide-mode-name">Quotes</div>
-                                <div class="entry-guide-mode-desc">Punctuation practice and longer passages. Enable the Bible Mode toggle for scripture memorization runs.</div>
-                            </div>
-                            <div class="entry-guide-mode-card">
-                                <div class="entry-guide-mode-name">Words 30s</div>
-                                <div class="entry-guide-mode-desc">A 30-second high-intensity sprint built for fast reaction speed and stamina.</div>
-                            </div>
-                            <div class="entry-guide-mode-card">
-                                <div class="entry-guide-mode-name">Challenges</div>
-                                <div class="entry-guide-mode-desc">Daily and weekly quests that feed XP, leveling progress, and account unlocks.</div>
-                            </div>
-                            <div class="entry-guide-mode-card">
-                                <div class="entry-guide-mode-name">Community Hub</div>
-                                <div class="entry-guide-mode-desc">Collaborative Active Attacker fleet battles where the whole player base pushes back together.</div>
-                            </div>
-                            <div class="entry-guide-mode-card">
-                                <div class="entry-guide-mode-name">Galactic Progression</div>
-                                <div class="entry-guide-mode-desc">The star-path campaign mode and story progression layer of the game.</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="entry-guide-side">
-                        <div class="entry-guide-side-card">
-                            <div class="entry-guide-side-title">Mode Intel</div>
-                            <div class="entry-guide-side-copy">Leaderboards are tracked per mode, so each queue has its own competitive lane and best-score chase.</div>
-                        </div>
-                        <div class="entry-guide-side-card">
-                            <div class="entry-guide-side-title">Audio HUD</div>
-                            <div class="entry-guide-side-copy">Music and mechanical sound settings live in the top-right HUD once you enter the main command screen.</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="entry-guide-actions">
-                    <button type="button" class="sector-map-btn entry-guide-cta" id="entry-guide-cta" onclick="continueFromSplashGuide()">Initialize Jump</button>
-                    <div class="entry-guide-continue-note">Tap or press any key to continue</div>
+                    <p class="entry-splash-note" id="entry-splash-note">No account needed. Your progress is saved in this browser.</p>
                 </div>
             </div>
         </div>
@@ -120,27 +63,29 @@
 
 <div id="scroll-header" aria-hidden="true"></div>
 <div id="ui-toast" class="ui-toast" role="status" aria-live="polite"></div>
+<div id="result-announcer" class="sr-only" role="status" aria-live="polite"></div>
 <div id="lb-user-tooltip" class="lb-user-tooltip" aria-hidden="true"></div>
 <button id="install-app-btn" class="install-app-btn" type="button" aria-label="Install this app">Install App</button>
-<div class="top-bar" id="top-bar">
+<header class="top-bar" id="top-bar">
     <div class="top-bar-left">
         <div class="top-left-actions">
-            <button class="share-toggle" id="share-toggle" onclick="shareSite()" aria-label="Share this site">
-                <span>Share</span>
+            <button type="button" class="btn btn-icon btn-ghost share-toggle" id="share-toggle" onclick="shareSite()" aria-label="Share this site" title="Share this site">
+                <svg class="btn-ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2.5 16.5 7h-3.3v8h-2.4V7H7.5L12 2.5zM4.5 13h2.4v6.1h10.2V13h2.4v8.5H4.5V13z"/></svg>
+                <span class="btn-label sr-only">Share</span>
             </button>
-            <button class="community-alert-btn" id="community-alert-btn" onclick="openCommunityHub()" aria-label="Humanity Needs Your Help! Open community goal">
-                <span class="icon" aria-hidden="true">🛸</span>
-                <span class="label">Humanity Needs Your Help!</span>
+            <button type="button" class="btn btn-secondary community-alert-btn" id="community-alert-btn" onclick="openCommunityHub()" aria-label="Team goal: open this week's team goal" title="Team goal">
+                <span class="icon btn-ico" aria-hidden="true">🛸</span>
+                <span class="label btn-label">Team goal</span>
             </button>
         </div>
-        <button type="button" class="sector-map-btn" id="sector-map-btn" onclick="openSectorMap()">
-            <span class="sector-map-btn-icon" aria-hidden="true">
+        <button type="button" class="btn btn-secondary sector-map-btn" id="sector-map-btn" onclick="openSectorMap()" title="Story mode">
+            <span class="sector-map-btn-icon btn-ico" aria-hidden="true">
                 <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                    <path d="M12 2.8l2.05 5.15 5.15 2.05-5.15 2.05L12 17.2l-2.05-5.15L4.8 10l5.15-2.05L12 2.8z" fill="#f5edff"/>
-                    <path d="M12 6.4l1.06 2.54 2.54 1.06-2.54 1.06L12 13.6l-1.06-2.54L8.4 10l2.54-1.06L12 6.4z" fill="#bf5af2"/>
+                    <path d="M12 2.8l2.05 5.15 5.15 2.05-5.15 2.05L12 17.2l-2.05-5.15L4.8 10l5.15-2.05L12 2.8z" fill="#fff6e0"/>
+                    <path d="M12 6.4l1.06 2.54 2.54 1.06-2.54 1.06L12 13.6l-1.06-2.54L8.4 10l2.54-1.06L12 6.4z" fill="#ffb347"/>
                 </svg>
             </span>
-            <span class="sector-map-btn-label">Galactic Progression</span>
+            <span class="sector-map-btn-label btn-label">Story mode</span>
         </button>
     </div>
     <div class="top-bar-right">
@@ -153,15 +98,16 @@
                 <div class="xp-bar-wrap">
                     <div class="xp-bar-fill" id="xp-bar-fill" style="width:0%"></div>
                     <div class="xp-bar-overlay">
-                        <span class="level-badge" id="level-badge">Lv 1</span>
+                        <span class="level-badge" id="level-badge">Level 1</span>
                         <span class="xp-counter" id="xp-counter">0 / 500 XP</span>
                     </div>
                 </div>
             </div>
-
-            <button class="profile-toggle" id="profile-toggle" onclick="openProfileOrLogin()">
-                <span class="profile-user-icon" id="profile-user-icon" aria-hidden="true">👤</span>
-                <span id="profile-toggle-label">Profile</span>
+            <span id="account-mode-badge" class="account-mode-badge"></span>
+            <span class="backend-mode-badge" id="backend-mode-badge" data-mode="unknown" role="status" aria-live="polite" title="Checking whether the online account service is available.">Checking connection</span>
+            <button type="button" class="btn btn-primary profile-toggle" id="profile-toggle" onclick="openProfileOrLogin()" title="Profile">
+                <span class="profile-user-icon btn-ico" id="profile-user-icon" aria-hidden="true">👤</span>
+                <span id="profile-toggle-label" class="btn-label">Profile</span>
                 <span class="profile-hover-card" id="profile-hover-card" aria-hidden="true">
                     <div class="profile-hover-title" id="profile-hover-title">Not logged in</div>
                     <div class="profile-hover-line" id="profile-hover-line-1">Log in to view your progress snapshot.</div>
@@ -169,50 +115,141 @@
                     <div class="profile-hover-line" id="profile-hover-line-3"></div>
                 </span>
             </button>
-
-            <button class="leaderboard-toggle" id="leaderboard-toggle" onclick="openLeaderboard()">
-                <span>Leaderboards</span>
+            <button type="button" class="btn btn-secondary leaderboard-toggle" id="leaderboard-toggle" onclick="openLeaderboard()" title="Leaderboards">
+                <svg class="btn-ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 3h10v2h3.5v4a4.5 4.5 0 0 1-3.7 4.4A5.5 5.5 0 0 1 13 17.4V19h3v2H8v-2h3v-1.6a5.5 5.5 0 0 1-3.8-4A4.5 4.5 0 0 1 3.5 9V5H7V3zm0 4H5.5v2c0 1 .6 1.9 1.5 2.3V7zm10 0v4.3c.9-.4 1.5-1.3 1.5-2.3V7H17z"/></svg>
+                <span class="btn-label">Leaderboards</span>
             </button>
+            <button type="button" class="btn btn-icon btn-ghost settings-toggle" id="settings-toggle" onclick="toggleSettingsPanel(event)" aria-label="Settings" aria-haspopup="dialog" aria-expanded="false" aria-controls="settings-panel" title="Settings">
+                <svg class="btn-ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.7 7.7 0 0 0-1.7-1L15 3H9l-.4 2.9a7.7 7.7 0 0 0-1.7 1l-2.5-1-2 3.5L4.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.7 7.7 0 0 0 1.7 1L9 21h6l.4-2.9a7.7 7.7 0 0 0 1.7-1l2.5 1 2-3.5L19.4 13zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>
+                <span class="btn-label sr-only">Settings</span>
+            </button>
+        </div>
+    </div>
+</header>
 
-            <div class="keysound-wrap" id="keysound-wrap">
-                <button class="keysound-toggle" id="keysound-toggle" onclick="toggleKeySoundMenu(event)">
-                    <span id="keysound-label">Key Sounds</span>
-                    <span id="keysound-state" class="toggle-indicator off">✗</span>
-                </button>
-                <div class="keysound-menu" id="keysound-menu" aria-hidden="true">
-                    <div class="keysound-menu-title">Sound Pack</div>
-                    <div class="menu-volume-row">
-                        <span class="menu-volume-label">Volume</span>
-                        <span class="menu-volume-value" id="keysound-volume-value">100%</span>
+<div class="settings-panel" id="settings-panel" hidden aria-hidden="true">
+    <div class="settings-panel-card panel" role="dialog" aria-labelledby="settings-panel-title">
+        <div class="modal-header">
+            <h2 class="modal-title" id="settings-panel-title">Settings</h2>
+            <button type="button" class="btn btn-icon modal-close" onclick="closeSettingsPanel()" aria-label="Close settings">×</button>
+        </div>
+        <div class="settings-body">
+            <section class="settings-section" aria-labelledby="settings-typing-title">
+                <h3 class="settings-section-title" id="settings-typing-title">Typing</h3>
+                <div class="settings-row">
+                    <div class="settings-row-text">
+                        <span class="settings-row-label" id="ghost-toggle-label">Pace marker</span>
+                        <span class="settings-row-help">A faint marker shows where your last run was at this point.</span>
                     </div>
-                    <input type="range" class="menu-volume-slider" id="keysound-volume-slider" min="0" max="100" step="1" value="100" oninput="handleKeySoundVolumeInput(event)" aria-label="Keyboard sound volume">
-                    <button type="button" class="keysound-option" data-pack="nk-cream" onclick="selectKeySoundPack('nk-cream', event)">NK Creams</button>
-                    <button type="button" class="keysound-option" data-pack="cherrymx-blue-abs" onclick="selectKeySoundPack('cherrymx-blue-abs', event)">Cherry MX Blues</button>
-                    <button type="button" class="keysound-option" data-pack="Buckling Springs" onclick="selectKeySoundPack('Buckling Springs', event)">Buckling Springs</button>
-                    <button type="button" class="keysound-option" data-pack="Cherry MX Blacks" onclick="selectKeySoundPack('Cherry MX Blacks', event)">Cherry MX Blacks</button>
-                    <button type="button" class="keysound-option" data-pack="Cherry MX Browns" onclick="selectKeySoundPack('Cherry MX Browns', event)">Cherry MX Browns</button>
-                    <button type="button" class="keysound-option" data-pack="Cherry MX Reds" onclick="selectKeySoundPack('Cherry MX Reds', event)">Cherry MX Reds</button>
-                    <button type="button" class="keysound-option" onclick="toggleKeySounds()">Toggle On / Off</button>
+                    <button type="button" class="switch" id="ghost-toggle-btn" role="switch" aria-checked="true" aria-labelledby="ghost-toggle-label" onclick="toggleGhostCursor()">Ghost Cursor: On</button>
                 </div>
-            </div>
-
-            <div class="music-wrap" id="music-wrap">
-                <button class="music-toggle" id="music-toggle" onclick="toggleMusicMenu(event)">
-                    <span>Music</span>
-                    <span id="music-state" class="toggle-indicator on">✓</span>
-                </button>
-                <div class="music-menu" id="music-menu" aria-hidden="true">
-                    <div class="music-menu-title">Main Menu Theme</div>
-                    <div class="menu-volume-row">
-                        <span class="menu-volume-label">Volume</span>
-                        <span class="menu-volume-value" id="music-volume-value">25%</span>
+                <div class="settings-row">
+                    <div class="settings-row-text">
+                        <span class="settings-row-label" id="mining-fx-toggle-label">Effects</span>
+                        <span class="settings-row-help">Laser and asteroid animations while you type.</span>
                     </div>
+                    <button type="button" class="switch" id="mining-fx-toggle-btn" role="switch" aria-checked="false" aria-labelledby="mining-fx-toggle-label" onclick="toggleMiningVisuals()">Mining FX: Off</button>
+                </div>
+                <div class="settings-row" id="laser-sound-row">
+                    <div class="settings-row-text">
+                        <span class="settings-row-label" id="mining-fx-sfx-toggle-label">Laser sounds</span>
+                    </div>
+                    <button type="button" class="switch mining-sfx-icon-toggle on" id="mining-fx-sfx-toggle-btn" role="switch" aria-checked="true" aria-labelledby="mining-fx-sfx-toggle-label" onclick="toggleMiningLaserSound()">🔊</button>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-row-text">
+                        <span class="settings-row-label" id="live-chart-toggle-label">Live speed chart</span>
+                        <span class="settings-row-help">The speed graph under the text while you type.</span>
+                    </div>
+                    <button type="button" class="switch" id="live-chart-toggle-btn" role="switch" aria-checked="true" aria-labelledby="live-chart-toggle-label" onclick="toggleLiveChart()"></button>
+                </div>
+            </section>
+            <section class="settings-section" aria-labelledby="settings-sound-title">
+                <h3 class="settings-section-title" id="settings-sound-title">Sound</h3>
+                <div class="settings-row">
+                    <div class="settings-row-text">
+                        <span class="settings-row-label" id="keysound-switch-label">Key sounds</span>
+                    </div>
+                    <button type="button" class="switch" id="keysound-switch" role="switch" aria-checked="true" aria-labelledby="keysound-switch-label" onclick="toggleKeySounds()"></button>
+                </div>
+                <div class="settings-row settings-row-slider">
+                    <label class="settings-row-label" for="keysound-volume-slider">Key sound volume</label>
+                    <span class="menu-volume-value" id="keysound-volume-value">100%</span>
+                    <input type="range" class="menu-volume-slider" id="keysound-volume-slider" min="0" max="100" step="1" value="100" oninput="handleKeySoundVolumeInput(event)" aria-label="Key sound volume">
+                </div>
+                <div class="keysound-wrap settings-disclosure-wrap" id="keysound-wrap">
+                    <button type="button" class="settings-disclosure keysound-toggle" id="keysound-toggle" onclick="toggleKeySoundMenu(event)" aria-expanded="false" aria-controls="keysound-menu">
+                        <span class="settings-row-label" id="keysound-label">Key sound pack</span>
+                        <span class="settings-disclosure-value" id="keysound-pack-current">NK Creams</span>
+                        <span id="keysound-state" class="toggle-indicator off" hidden aria-hidden="true">✗</span>
+                        <span class="settings-disclosure-arrow" aria-hidden="true">▾</span>
+                    </button>
+                    <div class="keysound-menu" id="keysound-menu" aria-hidden="true">
+                        <button type="button" class="keysound-option" data-pack="nk-cream" onclick="selectKeySoundPack('nk-cream', event)">NK Creams</button>
+                        <button type="button" class="keysound-option" data-pack="cherrymx-blue-abs" onclick="selectKeySoundPack('cherrymx-blue-abs', event)">Cherry MX Blues</button>
+                        <button type="button" class="keysound-option" data-pack="Buckling Springs" onclick="selectKeySoundPack('Buckling Springs', event)">Buckling Springs</button>
+                        <button type="button" class="keysound-option" data-pack="Cherry MX Blacks" onclick="selectKeySoundPack('Cherry MX Blacks', event)">Cherry MX Blacks</button>
+                        <button type="button" class="keysound-option" data-pack="Cherry MX Browns" onclick="selectKeySoundPack('Cherry MX Browns', event)">Cherry MX Browns</button>
+                        <button type="button" class="keysound-option" data-pack="Cherry MX Reds" onclick="selectKeySoundPack('Cherry MX Reds', event)">Cherry MX Reds</button>
+                    </div>
+                </div>
+                <div class="settings-row">
+                    <div class="settings-row-text">
+                        <span class="settings-row-label" id="music-switch-label">Music</span>
+                    </div>
+                    <button type="button" class="switch" id="music-switch" role="switch" aria-checked="true" aria-labelledby="music-switch-label" onclick="toggleMusic()"></button>
+                </div>
+                <div class="settings-row settings-row-slider">
+                    <label class="settings-row-label" for="music-volume-slider">Music volume</label>
+                    <span class="menu-volume-value" id="music-volume-value">25%</span>
                     <input type="range" class="menu-volume-slider" id="music-volume-slider" min="0" max="100" step="1" value="25" oninput="handleMusicVolumeInput(event)" aria-label="Music volume">
-                    <button type="button" class="music-option" data-theme="dark" onclick="selectMusicTheme('dark', event)">Dark Main Theme</button>
-                    <button type="button" class="music-option" data-theme="universe" onclick="selectMusicTheme('universe', event)">Your Own Personal Universe</button>
-                    <button type="button" class="music-option" onclick="toggleMusicMuteFromMenu()">Toggle On / Off</button>
                 </div>
-            </div>
+                <div class="music-wrap settings-disclosure-wrap" id="music-wrap">
+                    <button type="button" class="settings-disclosure music-toggle" id="music-toggle" onclick="toggleMusicMenu(event)" aria-expanded="false" aria-controls="music-menu">
+                        <span class="settings-row-label">Music track</span>
+                        <span class="settings-disclosure-value" id="music-theme-current">Dark Main Theme</span>
+                        <span id="music-state" class="toggle-indicator on" hidden aria-hidden="true">✓</span>
+                        <span class="settings-disclosure-arrow" aria-hidden="true">▾</span>
+                    </button>
+                    <div class="music-menu" id="music-menu" aria-hidden="true">
+                        <button type="button" class="music-option" data-theme="dark" onclick="selectMusicTheme('dark', event)">Dark Main Theme</button>
+                        <button type="button" class="music-option" data-theme="universe" onclick="selectMusicTheme('universe', event)">Your Own Personal Universe</button>
+                    </div>
+                </div>
+            </section>
+            <div id="settings-engine-slot"></div>
+            <section class="settings-section" aria-labelledby="settings-more-title">
+                <h3 class="settings-section-title" id="settings-more-title">More</h3>
+                <div class="settings-actions">
+                    <button type="button" class="btn btn-secondary" onclick="openHelpModal()">How the game works</button>
+                    <button type="button" class="btn btn-ghost" onclick="shareSite()">Share this site</button>
+                </div>
+            </section>
+        </div>
+    </div>
+</div>
+
+<div class="profile-modal modal-shell" id="help-modal" aria-hidden="true" onclick="handleHelpModalBackdrop(event)">
+    <div class="profile-modal-card" role="dialog" aria-modal="true" aria-labelledby="help-modal-title">
+        <div class="profile-modal-header">
+            <div class="profile-modal-title" id="help-modal-title">How the game works</div>
+            <button type="button" class="leaderboard-modal-close secondary" onclick="closeHelpModal()" aria-label="Close help">×</button>
+        </div>
+        <div class="help-body">
+            <p>Type the text shown in the box. Every run gives you a speed in words per minute (WPM) and an accuracy score. Space starts a new run, Tab restarts the one you are on, and Backspace fixes a mistake.</p>
+            <h3>Modes</h3>
+            <ul>
+                <li><strong>Quotes</strong> and <strong>Random Words</strong> are normal runs.</li>
+                <li><strong>Words 30s</strong> is a timed sprint.</li>
+                <li><strong>Adaptive</strong> builds short drills from the keys you miss or type slowly.</li>
+                <li><strong>Challenges</strong> are daily and weekly goals that pay out XP.</li>
+            </ul>
+            <h3>XP, levels and the shop</h3>
+            <p>Finished runs earn XP. Every 500 XP is a level, and each level gives you a crystal to spend in the shop on key-sound packs, music and cosmetic extras.</p>
+            <h3>The story</h3>
+            <p>In Story mode every run is a mining trip. You pilot a ship through the Lyra Gate, break asteroids by typing, and harvest Aether crystals. The whole player base shares one weekly team goal, which you can open from the Team goal button in the top bar.</p>
+            <h3>Accounts</h3>
+            <p>You can play as a guest; progress stays in this browser. Create a free account to keep your scores across devices and appear on the leaderboards.</p>
         </div>
     </div>
 </div>
@@ -221,18 +258,22 @@
     <div class="pb-banner">New Personal Best!</div>
 </div>
 
+<main id="main-content">
 <div class="main-title-logo-wrap">
-    <img class="main-title-logo" src="typemine-galactic-logo.png" alt="TypeMine Galactic" onerror="this.style.display='none';const f=document.getElementById('main-title-fallback');if(f)f.style.display='block';">
+    <picture>
+        <source srcset="typemine-galactic-logo.webp" type="image/webp">
+        <img class="main-title-logo" src="typemine-galactic-logo.png" width="1002" height="251" alt="TypeMine Galactic" decoding="async" onerror="this.style.display='none';const f=document.getElementById('main-title-fallback');if(f)f.style.display='block';">
+    </picture>
     <h1 id="main-title-fallback" style="display:none;">TypeMine Galactic</h1>
 </div>
 
-<div class="mode-tabs">
+<nav class="mode-tabs" aria-label="Modes" role="tablist">
     <button class="mode-tab" data-mode="quotes" onclick="setMode('quotes')">Quotes</button>
     <button class="mode-tab active" data-mode="words" onclick="setMode('words')">Random Words</button>
-    <button class="mode-tab" data-mode="words30" onclick="setMode('words30')">Words 30s</button>
-    <button class="mode-tab" data-mode="adaptive" onclick="setMode('adaptive')" title="Drills built from your slowest and most-missed keys">Adaptive</button>
+    <button class="mode-tab" data-mode="words30" onclick="setMode('words30')">Timed</button>
+    <button class="mode-tab" data-mode="adaptive" onclick="setMode('adaptive')" title="Drills built from your slowest and most-missed keys">Weak keys</button>
     <button class="mode-tab" data-mode="daily" onclick="setMode('daily')">Challenges</button>
-</div>
+</nav>
 <div class="community-mode-popup" id="community-mode-popup" aria-live="polite">
     <div class="community-mode-popup-main">
         <div class="community-mode-popup-title" id="community-mode-popup-title">Community Mode</div>
@@ -244,7 +285,57 @@
 
 <div class="container">
 
+<div id="goals-strip" class="goals-strip" aria-label="Today's goals"></div>
+
 <div id="typing-area">
+    <div class="engine-options" id="engine-options" role="toolbar" aria-label="Test options">
+        <div class="engine-opt-row">
+            <div class="engine-opt-group" id="engine-opt-time">
+                <span class="engine-opt-label">Time</span>
+                <button type="button" class="engine-opt" data-opt="time" data-val="15">15</button>
+                <button type="button" class="engine-opt" data-opt="time" data-val="30">30</button>
+                <button type="button" class="engine-opt" data-opt="time" data-val="60">60</button>
+                <button type="button" class="engine-opt" data-opt="time" data-val="120">120</button>
+            </div>
+            <div class="engine-opt-group" id="engine-opt-words">
+                <span class="engine-opt-label">Words</span>
+                <button type="button" class="engine-opt" data-opt="words" data-val="10">10</button>
+                <button type="button" class="engine-opt" data-opt="words" data-val="25">25</button>
+                <button type="button" class="engine-opt" data-opt="words" data-val="50">50</button>
+                <button type="button" class="engine-opt" data-opt="words" data-val="100">100</button>
+            </div>
+            <div class="engine-opt-group" id="engine-opt-text">
+                <button type="button" class="engine-opt" data-opt="punctuation" data-toggle title="Add commas, periods and capitals">Punctuation</button>
+                <button type="button" class="engine-opt" data-opt="numbers" data-toggle title="Mix numbers into the words">Numbers</button>
+                <span class="engine-opt-label">List</span>
+                <button type="button" class="engine-opt" data-opt="wordList" data-val="common" title="The 200 most common words">Common</button>
+                <button type="button" class="engine-opt" data-opt="wordList" data-val="wide" title="About 1,500 everyday words">Wide</button>
+            </div>
+            <button type="button" class="engine-opt engine-opt-more" id="engine-opt-more" aria-expanded="false" aria-controls="engine-opt-extra">More options</button>
+        </div>
+        <div class="engine-opt-row engine-opt-extra" id="engine-opt-extra" hidden>
+            <div class="engine-opt-group">
+                <span class="engine-opt-label">Cursor</span>
+                <button type="button" class="engine-opt" data-opt="caret" data-val="block">Block</button>
+                <button type="button" class="engine-opt" data-opt="caret" data-val="line">Line</button>
+                <button type="button" class="engine-opt" data-opt="caret" data-val="underline">Underline</button>
+                <button type="button" class="engine-opt" data-opt="caret" data-val="off">Off</button>
+                <button type="button" class="engine-opt" data-opt="smoothCaret" data-toggle title="Slide the cursor instead of jumping">Smooth</button>
+            </div>
+            <div class="engine-opt-group">
+                <span class="engine-opt-label">Show</span>
+                <button type="button" class="engine-opt" data-opt="liveStats" data-toggle title="Show WPM and accuracy while you type">Live stats</button>
+                <button type="button" class="engine-opt" data-opt="liveChart" data-toggle title="Show the speed chart while you type">Live chart</button>
+            </div>
+            <div class="engine-opt-group">
+                <span class="engine-opt-label">Stop on error</span>
+                <button type="button" class="engine-opt" data-opt="stopOnError" data-val="off">Off</button>
+                <button type="button" class="engine-opt" data-opt="stopOnError" data-val="letter" title="A wrong letter is not accepted">Letter</button>
+                <button type="button" class="engine-opt" data-opt="stopOnError" data-val="word" title="You cannot leave a word with a mistake in it">Word</button>
+                <button type="button" class="engine-opt" data-opt="strictBackspace" data-toggle title="Backspace cannot go back into a word you typed correctly">Strict backspace</button>
+            </div>
+        </div>
+    </div>
     <div class="stats">
         <div class="bible-mode-inline" id="bible-mode-inline">
             <span>Bible Mode</span>
@@ -262,7 +353,7 @@
             <div class="stat-value" id="accuracy">—</div>
         </div>
         <div class="stat">
-            <div class="stat-label">Time</div>
+            <div class="stat-label" id="timer-label">Time</div>
             <div class="stat-value" id="timer">0s</div>
         </div>
     </div>
@@ -272,6 +363,7 @@
     </div>
     <div id="ghost-delta-slot" aria-live="off"></div>
 
+    <div class="engine-badges" aria-live="polite"><span class="capslock-badge" id="capslock-badge" hidden>Caps Lock is on</span></div>
     <div class="quote-display" id="quote-display" onclick="focusInput()"><div class="mobile-tap-hint" id="mobile-tap-hint">Tap here to start typing</div></div>
     <div class="mining-laser-overlay" id="mining-laser-overlay" aria-hidden="true">
         <span class="mining-laser-ship" id="mining-laser-ship" aria-hidden="true"></span>
@@ -288,14 +380,11 @@
            data-bwignore="true" data-1p-ignore="true"
            data-lpignore="true" data-form-type="other">
 
-    <div class="hint" id="hint">Click the text above to begin &nbsp;·&nbsp; Tab to restart &nbsp;·&nbsp; Backspace to correct</div>
+    <div class="hint" id="hint">Tab: restart &nbsp;·&nbsp; Esc: new text &nbsp;·&nbsp; Backspace: fix</div>
 
     <div class="buttons" style="margin-top: 1.25rem;">
-        <button class="new-test-btn" onclick="newTest()">New Quote<span class="btn-hint">(Spacebar)</span></button>
+        <button class="new-test-btn" onclick="newTest()">New Quote<span class="btn-hint">(Esc)</span></button>
         <button class="secondary" onclick="restart()">Restart<span class="btn-hint">(Tab)</span></button>
-        <button class="secondary" id="ghost-toggle-btn" onclick="toggleGhostCursor()">Ghost Cursor: On</button>
-        <button class="secondary" id="mining-fx-toggle-btn" onclick="toggleMiningVisuals()">Mining FX: On</button>
-        <button class="secondary mining-sfx-icon-toggle on" id="mining-fx-sfx-toggle-btn" onclick="toggleMiningLaserSound()" style="display:none;" aria-label="Mute laser sounds" title="Mute laser sounds">🔊</button>
     </div>
 </div><!-- /typing-area -->
 
@@ -308,10 +397,15 @@
             <span class="history-best" id="history-best"></span>
         </div>
         <div id="history-list"></div>
-        <button class="history-clear" onclick="clearHistory()">Clear history</button>
+        <div class="history-actions">
+            <button class="history-clear" onclick="clearHistory()">Clear history</button>
+            <button class="history-lifetime-btn" type="button" onclick="openLifetimeStatsModal()">Lifetime stats</button>
+        </div>
     </div>
 
 </div>
+
+</main>
 
 <div class="leaderboard-modal" id="leaderboard-modal" aria-hidden="true" onclick="handleLeaderboardBackdrop(event)">
     <div class="leaderboard-modal-card" role="dialog" aria-modal="true" aria-labelledby="leaderboard-modal-title">
@@ -319,11 +413,20 @@
             <div class="leaderboard-modal-title" id="leaderboard-modal-title">Leaderboard</div>
             <button type="button" class="leaderboard-modal-close secondary" onclick="closeLeaderboard()" aria-label="Close leaderboard">X</button>
         </div>
-        <div class="lb-tabs">
-            <button class="lb-tab active" data-tab="alltime" onclick="setLbTab('alltime')">All Time</button>
-            <button class="lb-tab" data-tab="weekly" onclick="setLbTab('weekly')">This Week</button>
-            <button class="lb-tab" data-tab="community" onclick="setLbTab('community')">Community Goal</button>
+        <div class="lb-tabs" role="tablist" aria-label="Leaderboard views">
+            <button class="lb-tab active" data-tab="alltime" role="tab" aria-selected="true" onclick="setLbTab('alltime')">All time</button>
+            <button class="lb-tab" data-tab="weekly" role="tab" aria-selected="false" onclick="setLbTab('weekly')">This week</button>
+            <button class="lb-tab" data-tab="friends" role="tab" aria-selected="false" onclick="setLbTab('friends')">Friends</button>
+            <button class="lb-tab" data-tab="community" role="tab" aria-selected="false" onclick="setLbTab('community')">Team goal</button>
         </div>
+        <div class="lb-mode-filter" id="lb-mode-filter" role="group" aria-label="Filter by mode">
+            <span class="lb-mode-filter-label">Mode</span>
+            <button type="button" class="lb-mode-btn active" data-mode="all" aria-pressed="true" onclick="setLbMode('all')">All</button>
+            <button type="button" class="lb-mode-btn" data-mode="quotes" aria-pressed="false" onclick="setLbMode('quotes')">Quotes</button>
+            <button type="button" class="lb-mode-btn" data-mode="words" aria-pressed="false" onclick="setLbMode('words')">Random Words</button>
+            <button type="button" class="lb-mode-btn" data-mode="words30" aria-pressed="false" onclick="setLbMode('words30')">Timed</button>
+        </div>
+        <div class="lb-compare-panel" id="lb-compare-panel" hidden></div>
         <div class="leaderboard-list" id="leaderboard-list"></div>
     </div>
 </div>
@@ -331,10 +434,9 @@
 <div class="leaderboard-modal" id="sector-map-modal" aria-hidden="true" onclick="handleSectorMapBackdrop(event)">
     <div class="leaderboard-modal-card" role="dialog" aria-modal="true" aria-labelledby="sector-map-title">
         <div class="leaderboard-modal-header">
-            <div class="leaderboard-modal-title" id="sector-map-title">Sector Map</div>
-            <button type="button" class="leaderboard-modal-close secondary" onclick="closeSectorMap()" aria-label="Close sector map">X</button>
+            <div class="leaderboard-modal-title" id="sector-map-title">Story map</div>
+            <button type="button" class="leaderboard-modal-close secondary" onclick="closeSectorMap()" aria-label="Close story map">X</button>
         </div>
-        <div class="sector-map-soon-banner">More sectors coming online soon</div>
         <div class="sector-map-wrap">
             <svg id="sector-map-svg" class="sector-map-svg" viewBox="0 0 1200 720" xmlns="http://www.w3.org/2000/svg" aria-label="Sector map systems and constellation routes">
                 <defs>
@@ -367,19 +469,20 @@
                 <g id="sector-map-nodes"></g>
             </svg>
             <div class="sector-tactical-overlay" id="sector-tactical-overlay">
-                <div class="sector-tactical-title">Sector Map Guide</div>
-                <div id="sector-tactical-body">Bright stars are travel-ready sectors. Dim stars are locked until your level and average WPM are high enough. Dotted links show active routes between sectors you can currently access.</div>
+                <div class="sector-tactical-title">How it works</div>
+                <div id="sector-tactical-body">Click a bright star to play it. Grey stars open as you level up or are coming later.</div>
             </div>
             <div class="sector-node-hover-bubble" id="sector-node-hover-bubble" aria-hidden="true"></div>
         </div>
+        <div class="sector-map-list" id="sector-map-list" aria-label="Sectors"></div>
     </div>
 </div>
 
 <div class="leaderboard-modal" id="community-hub-modal" aria-hidden="true" onclick="handleCommunityHubBackdrop(event)">
     <div class="leaderboard-modal-card" role="dialog" aria-modal="true" aria-labelledby="community-hub-title">
         <div class="leaderboard-modal-header">
-            <div class="leaderboard-modal-title community-hub-glitch" id="community-hub-title" data-text="Community Goal: Planetary Preservation">Community Goal: Planetary Preservation</div>
-            <button type="button" class="leaderboard-modal-close secondary" onclick="closeCommunityHub()" aria-label="Close community goal menu">X</button>
+            <div class="leaderboard-modal-title community-hub-glitch" id="community-hub-title" data-text="This week's team goal">This week's team goal</div>
+            <button type="button" class="leaderboard-modal-close secondary" onclick="closeCommunityHub()" aria-label="Close team goal">X</button>
         </div>
         <div id="community-hub-content"></div>
     </div>
@@ -394,15 +497,15 @@
                 <span><span class="lyra-acc-value" id="lyra-acc">100</span>% ACC</span>
                 <span><span class="lyra-time-value" id="lyra-time">0:00</span></span>
             </div>
-            <button type="button" class="lyra-exit-btn" onclick="closeLyraGate()" aria-label="Exit to galaxy">
+            <button type="button" class="lyra-exit-btn" onclick="closeLyraGate()" aria-label="Back to story map">
                 <span class="lyra-exit-icon" aria-hidden="true">←</span>
-                <span>Exit to Galaxy</span>
+                <span class="lyra-exit-label">Back to map</span>
             </button>
         </div>
         <div class="lyra-gate-wrap">
             <div class="lyra-hud">
-                <span>Mining Operation</span>
-                <span id="lyra-progress-text">Layer 1 · HP 180 / 180 · Combo x1.00</span>
+                <span>Mining run</span>
+                <span id="lyra-progress-text">Layer 1 · 240 of 240 hits left · Combo x1.00</span>
             </div>
             <div class="lyra-main-layout">
                 <div class="lyra-play-panel">
@@ -411,7 +514,7 @@
                             <div class="lyra-stars-layer" id="lyra-stars-layer"></div>
                             <div class="lyra-story-loading-overlay" id="lyra-story-loading-overlay" aria-hidden="true">
                                 <div class="lyra-story-loading-card">
-                                    <div class="lyra-story-loading-label" id="lyra-story-loading-label">Downloading Data...</div>
+                                    <div class="lyra-story-loading-label" id="lyra-story-loading-label">Loading book...</div>
                                     <div class="lyra-story-loading-bar">
                                         <span class="lyra-story-loading-fill" id="lyra-story-loading-fill"></span>
                                     </div>
@@ -426,6 +529,10 @@
                             <div class="lyra-explosion-layer" id="lyra-explosion-layer"></div>
                             <div class="lyra-asteroid-wrap" id="lyra-asteroid-wrap">
                                 <div class="lyra-asteroid" id="lyra-asteroid"></div>
+                            </div>
+                            <div class="lyra-next-crystal" id="lyra-next-crystal">
+                                <span class="lyra-next-crystal-track" aria-hidden="true"><span class="lyra-next-crystal-fill" id="lyra-next-crystal-fill"></span></span>
+                                <span class="lyra-next-crystal-label" id="lyra-next-crystal-label">About 8 words to the next 4 crystals</span>
                             </div>
                             <div class="lyra-overload-wrap" id="lyra-overload-wrap">
                                 <div class="lyra-overload-gauge" aria-hidden="true">
@@ -442,18 +549,18 @@
                                         <span class="lyra-overload-segment tier-low" data-overload-segment="1"></span>
                                     </div>
                                     <div class="lyra-overload-center">
-                                        <span>Overload</span>
+                                        <span>Power boost</span>
                                         <strong id="lyra-overload-status">0%</strong>
                                     </div>
                                 </div>
                                 <div class="lyra-overload-meta">
-                                    <strong id="lyra-overload-hint">Offline</strong>
+                                    <strong id="lyra-overload-hint">Charging</strong>
                                 </div>
-                                <button type="button" class="lyra-overload-trigger" id="lyra-overload-trigger" onclick="triggerLyraOverload('button')" disabled>Activate</button>
+                                <button type="button" class="lyra-overload-trigger" id="lyra-overload-trigger" onclick="triggerLyraOverload('button')" disabled title="Charges as you type words. Press Tab or click when ready.">Turn on</button>
                             </div>
                             <div class="lyra-scene-readout" id="lyra-scene-readout">
-                                <div class="lyra-scene-pill"><span>HP</span><strong id="lyra-scene-hp">180 / 180</strong></div>
-                                <div class="lyra-scene-pill"><span>DPS</span><strong id="lyra-scene-dps">0</strong></div>
+                                <div class="lyra-scene-pill"><span>Hits left</span><strong id="lyra-scene-hp">240 / 240</strong></div>
+                                <div class="lyra-scene-pill"><span>Hits per sec</span><strong id="lyra-scene-dps">0</strong></div>
                                 <div class="lyra-scene-pill"><span>Combo</span><strong id="lyra-scene-combo">x1.00</strong></div>
                             </div>
                             <div class="lyra-ship" id="lyra-ship"></div>
@@ -462,18 +569,18 @@
                 </div>
                 <aside class="lyra-terminal-sidebar" id="lyra-upgrades-sidebar">
                     <div class="lyra-sidebar-head">
-                        <div class="lyra-sidebar-eyebrow">Systems Console</div>
-                        <div class="lyra-sidebar-currency"><span>Aether Crystals</span><strong id="lyra-sidebar-crystals">0</strong></div>
+                        <div class="lyra-sidebar-eyebrow">Upgrades</div>
+                        <div class="lyra-sidebar-currency"><span>Crystals</span><strong id="lyra-sidebar-crystals">0</strong></div>
                         <div class="lyra-sidebar-summary">
-                            <div class="lyra-sidebar-stat"><span>Current Layer</span><strong id="lyra-sidebar-layer">1</strong></div>
-                            <div class="lyra-sidebar-stat"><span>Total DPS</span><strong id="lyra-sidebar-dps">0</strong></div>
+                            <div class="lyra-sidebar-stat"><span>Layer</span><strong id="lyra-sidebar-layer">1</strong></div>
+                            <div class="lyra-sidebar-stat"><span>Hits per second</span><strong id="lyra-sidebar-dps">0</strong></div>
                         </div>
                     </div>
-                    <div class="lyra-sidebar-tabs" role="tablist" aria-label="Mining systems tabs">
-                        <button type="button" class="lyra-sidebar-tab active" data-lyra-tab="systems" onclick="setLyraSidebarTab('systems')">Systems</button>
-                        <button type="button" class="lyra-sidebar-tab" data-lyra-tab="library" onclick="setLyraSidebarTab('library')">Library</button>
-                        <button type="button" class="lyra-sidebar-tab" data-lyra-tab="firmware" onclick="setLyraSidebarTab('firmware')">Firmware</button>
-                        <button type="button" class="lyra-sidebar-tab" data-lyra-tab="statistics" onclick="setLyraSidebarTab('statistics')">Statistics</button>
+                    <div class="lyra-sidebar-tabs" role="tablist" aria-label="Upgrade panels">
+                        <button type="button" class="lyra-sidebar-tab active" role="tab" data-lyra-tab="systems" onclick="setLyraSidebarTab('systems')">Upgrades</button>
+                        <button type="button" class="lyra-sidebar-tab" role="tab" data-lyra-tab="library" onclick="setLyraSidebarTab('library')">Books</button>
+                        <button type="button" class="lyra-sidebar-tab" role="tab" data-lyra-tab="firmware" onclick="setLyraSidebarTab('firmware')">Drone types</button>
+                        <button type="button" class="lyra-sidebar-tab" role="tab" data-lyra-tab="statistics" onclick="setLyraSidebarTab('statistics')">Stats</button>
                     </div>
                     <div class="lyra-sidebar-panels">
                         <div class="lyra-sidebar-panel active" id="lyra-panel-systems"></div>
@@ -489,20 +596,20 @@
                     <div class="lyra-story-meta" id="lyra-story-meta">Alice in Wonderland | Lewis Carroll</div>
                     <div class="lyra-story-controls">
                         <div class="lyra-book-progress" id="lyra-book-progress">0.0%</div>
-                        <button type="button" class="lyra-story-sfx-toggle" id="lyra-story-sfx-toggle" onclick="toggleMiningLaserSound()" aria-label="Mute mining sound effects" title="Mute mining sound effects">🔊</button>
+                        <button type="button" class="lyra-story-sfx-toggle" id="lyra-story-sfx-toggle" onclick="toggleMiningLaserSound()" aria-label="Mute laser sounds" title="Mute laser sounds">🔊</button>
                         <div class="lyra-story-reset" id="lyra-story-reset">
                             <button type="button" class="lyra-story-reset-toggle" id="lyra-story-reset-toggle" onclick="toggleLyraStoryResetMenu(event)" aria-expanded="false" aria-controls="lyra-story-reset-menu">
                                 Restart
                                 <span class="lyra-story-reset-arrow" aria-hidden="true">▾</span>
                             </button>
                             <div class="lyra-story-reset-menu" id="lyra-story-reset-menu" aria-hidden="true">
-                                <button type="button" class="lyra-story-reset-option" onclick="restartLyraStoryProgress('chapter')">
-                                    <strong>Restart Chapter</strong>
-                                    <span>Warning: your saved place jumps to this chapter start.</span>
+                                <button type="button" class="lyra-story-reset-option" id="lyra-story-reset-chapter" onclick="restartLyraStoryProgress('chapter')">
+                                    <strong>Restart this chapter</strong>
+                                    <span>Your saved place moves back to the start of the chapter.</span>
                                 </button>
                                 <button type="button" class="lyra-story-reset-option danger" onclick="restartLyraStoryProgress('book')">
-                                    <strong>Restart Book</strong>
-                                    <span>Warning: your saved place resets to the first word.</span>
+                                    <strong>Restart the book</strong>
+                                    <span>Your saved place goes back to the first word.</span>
                                 </button>
                             </div>
                         </div>
@@ -557,11 +664,11 @@
             <div class="profile-modal-title" id="profile-modal-title">Profile</div>
             <div class="profile-modal-header-actions">
                 <button type="button" class="profile-admin-btn" id="profile-admin-btn" onclick="openAdminPanel()" style="display:none;" aria-label="Open admin panel">Admin</button>
-                <button type="button" class="secondary" onclick="openLifetimeStatsModal()">Lifetime Stats</button>
+                <button type="button" class="secondary" onclick="openLifetimeStatsModal()">Lifetime stats</button>
                 <button type="button" class="secondary" id="logout-btn" onclick="logoutUser()" style="display:none;">Logout</button>
-                <button type="button" class="profile-account-cog" id="profile-account-cog" onclick="openAccountManagement()" aria-label="Manage your Account">
+                <button type="button" class="profile-account-cog" id="profile-account-cog" onclick="openAccountManagement()" aria-label="Account settings">
                     <span class="account-manage-icon" aria-hidden="true">⚙</span>
-                    <span class="account-manage-tip">Manage your Account</span>
+                    <span class="account-manage-tip">Account settings</span>
                 </button>
                 <button type="button" class="leaderboard-modal-close secondary" onclick="closeProfile()" aria-label="Close profile">X</button>
             </div>
@@ -593,7 +700,7 @@
 <div class="profile-modal" id="lifetime-stats-modal" aria-hidden="true" onclick="handleLifetimeStatsBackdrop(event)">
     <div class="profile-modal-card" role="dialog" aria-modal="true" aria-labelledby="lifetime-stats-modal-title">
         <div class="profile-modal-header">
-            <div class="profile-modal-title" id="lifetime-stats-modal-title">Lifetime Stats</div>
+            <div class="profile-modal-title" id="lifetime-stats-modal-title">Lifetime stats</div>
             <button type="button" class="leaderboard-modal-close secondary" onclick="closeLifetimeStatsModal()" aria-label="Close lifetime stats">X</button>
         </div>
         <div id="lifetime-stats-content"><div class="profile-loading">Loading...</div></div>
@@ -607,13 +714,14 @@
             <button type="button" class="leaderboard-modal-close secondary" onclick="closeSkills()" aria-label="Close shop">X</button>
         </div>
         <div id="skills-content"></div>
+        <div id="shop-owned-section" class="shop-owned-section"></div>
     </div>
 </div>
 
 <div class="profile-modal" id="inventory-modal" aria-hidden="true" onclick="handleInventoryBackdrop(event)">
     <div class="profile-modal-card" role="dialog" aria-modal="true" aria-labelledby="inventory-modal-title">
         <div class="profile-modal-header">
-            <div class="profile-modal-title" id="inventory-modal-title">Inventory</div>
+            <div class="profile-modal-title" id="inventory-modal-title">Owned</div>
             <button type="button" class="leaderboard-modal-close secondary" onclick="closeInventory()" aria-label="Close inventory">X</button>
         </div>
         <div id="inventory-content"></div>
@@ -651,30 +759,30 @@
 <div class="profile-modal" id="account-modal" aria-hidden="true" onclick="handleAccountModalBackdrop(event)">
     <div class="profile-modal-card" role="dialog" aria-modal="true" aria-labelledby="account-modal-title">
         <div class="profile-modal-header">
-            <div class="profile-modal-title" id="account-modal-title">Account Management</div>
+            <div class="profile-modal-title" id="account-modal-title">Account settings</div>
             <button type="button" class="leaderboard-modal-close secondary" onclick="closeAccountManagement()" aria-label="Close account management">X</button>
         </div>
         <div class="account-manage-grid">
             <div class="account-manage-card">
-                <div class="account-manage-title">Update Username</div>
+                <div class="account-manage-title">Change username</div>
                 <div class="account-manage-row">
                     <input id="account-new-username" type="text" maxlength="24" autocomplete="username" placeholder="new username">
-                    <button type="button" class="secondary" onclick="updateAccountUsername()">Update</button>
+                    <button type="button" class="secondary" onclick="updateAccountUsername()">Save</button>
                 </div>
             </div>
             <div class="account-manage-card">
-                <div class="account-manage-title">Change Password</div>
+                <div class="account-manage-title">Change password</div>
                 <div class="account-manage-row">
                     <input id="account-current-password" type="password" maxlength="72" autocomplete="current-password" placeholder="current password">
                     <input id="account-new-password" type="password" maxlength="72" autocomplete="new-password" placeholder="new password">
                     <input id="account-new-password-confirm" type="password" maxlength="72" autocomplete="new-password" placeholder="confirm new password">
-                    <button type="button" class="secondary" onclick="updateAccountPassword()">Update</button>
+                    <button type="button" class="secondary" onclick="updateAccountPassword()">Save</button>
                 </div>
             </div>
             <div class="account-manage-card">
-                <div class="account-manage-title">Delete Account</div>
+                <div class="account-manage-title">Delete account</div>
                 <div class="account-manage-row">
-                    <button type="button" class="secondary danger-btn" onclick="openDeleteAccountConfirm()">Delete Account</button>
+                    <button type="button" class="secondary danger-btn" onclick="openDeleteAccountConfirm()">Delete account</button>
                 </div>
             </div>
         </div>
@@ -685,7 +793,7 @@
 <div class="profile-modal" id="delete-account-modal" aria-hidden="true" onclick="handleDeleteAccountBackdrop(event)">
     <div class="profile-modal-card" role="dialog" aria-modal="true" aria-labelledby="delete-account-title">
         <div class="profile-modal-header">
-            <div class="profile-modal-title" id="delete-account-title">Confirm Deletion</div>
+            <div class="profile-modal-title" id="delete-account-title">Delete account</div>
             <button type="button" class="leaderboard-modal-close secondary" onclick="closeDeleteAccountConfirm()" aria-label="Close delete account confirmation">X</button>
         </div>
         <div class="delete-confirm-title">Delete your account permanently</div>
@@ -696,7 +804,7 @@
         </div>
         <div class="signup-modal-actions">
             <button type="button" class="secondary" onclick="closeDeleteAccountConfirm()">Cancel</button>
-            <button type="button" class="secondary danger-btn" onclick="deleteAccountConfirmed()">Delete Account</button>
+            <button type="button" class="secondary danger-btn" onclick="deleteAccountConfirmed()">Delete my account</button>
         </div>
         <div class="account-manage-note" id="delete-account-note"></div>
     </div>
@@ -705,7 +813,7 @@
 <div class="profile-modal" id="admin-modal" aria-hidden="true" onclick="handleAdminBackdrop(event)">
     <div class="profile-modal-card" role="dialog" aria-modal="true" aria-labelledby="admin-modal-title">
         <div class="profile-modal-header">
-            <div class="profile-modal-title" id="admin-modal-title">Admin Panel</div>
+            <div class="profile-modal-title" id="admin-modal-title">Admin panel</div>
             <button type="button" class="leaderboard-modal-close secondary" onclick="closeAdminPanel()" aria-label="Close admin panel">X</button>
         </div>
         <div class="admin-grid">
@@ -733,28 +841,40 @@
 </div>
 
 <!-- Result overlay -->
-<div class="result-overlay" id="result-overlay">
+<div class="result-overlay" id="result-overlay" role="dialog" aria-modal="true" aria-labelledby="result-title" aria-describedby="result-subtitle" aria-hidden="true">
     <div class="result-card">
+        <div id="result-announce" class="sr-only" aria-live="polite"></div>
         <button class="result-close" type="button" aria-label="Close results" onclick="closeResults()">X</button>
-        <h2 id="result-title">Well done!</h2>
+        <div class="result-mode-label" id="result-mode-label">Random words</div>
+        <h2 id="result-title">Run finished</h2>
+        <p class="subtitle" id="result-subtitle">Run finished</p>
+        <div id="result-pb-banner" class="result-pb-banner" style="display:none;"></div>
         <div id="challenge-result-banner" class="challenge-banner" style="display:none;"></div>
+        <div class="result-stats">
+            <div class="stat stat-orb">
+                <div class="stat-value" id="final-wpm">0</div>
+                <div class="stat-label">WPM</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="final-accuracy">0%</div>
+                <div class="stat-label">Accuracy</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value" id="final-time">0s</div>
+                <div class="stat-label">Time</div>
+            </div>
+        </div>
         <div id="result-new-badges" class="result-new-badges" style="display:none;"></div>
         <div class="result-main">
             <div class="result-left">
-                <p class="subtitle" id="result-subtitle">Test complete</p>
-                <div class="result-stats">
-                    <div class="stat">
-                        <div class="stat-label">WPM</div>
-                        <div class="stat-value" id="final-wpm">0</div>
-                    </div>
-                    <div class="stat">
-                        <div class="stat-label">Accuracy</div>
-                        <div class="stat-value" id="final-accuracy">0%</div>
-                    </div>
-                    <div class="stat">
-                        <div class="stat-label">Time</div>
-                        <div class="stat-value" id="final-time">0s</div>
-                    </div>
+                <div id="result-rewards" class="result-rewards"></div>
+                <div id="result-goals" class="result-goals"></div>
+                <div class="result-week-words" id="result-week-words"></div>
+                <div class="buttons result-actions">
+                    <button class="new-test-btn result-cta" id="result-cta-btn" type="button" onclick="runResultCta()">One more run</button>
+                    <button class="secondary new-text-btn" type="button" onclick="newTest()">New text<span class="btn-hint">(Spacebar)</span></button>
+                    <button class="secondary" type="button" onclick="tryAgain()">Try again<span class="btn-hint">(Tab)</span></button>
+                    <button class="secondary share-result-btn" id="share-result-btn" type="button" onclick="shareLastRun()">Share result</button>
                 </div>
                 <div class="rank-block">
                     <div class="rank-label" id="rank-label">—</div>
@@ -764,19 +884,15 @@
                     </div>
                     <div class="rank-caption" id="rank-caption">—</div>
                 </div>
-                <div class="buttons">
-                    <button class="new-test-btn" onclick="newTest()">New Quote<span class="btn-hint">(Spacebar)</span></button>
-                    <button class="secondary" onclick="tryAgain()">Try Again<span class="btn-hint">(Tab)</span></button>
-                </div>
             </div>
             <div class="result-right">
                 <div class="result-extra">
                     <div class="result-extra-item">
-                        <div class="result-extra-label">Raw WPM</div>
+                        <div class="result-extra-label">Speed before mistakes</div>
                         <div class="result-extra-value" id="final-raw-wpm">0</div>
                     </div>
                     <div class="result-extra-item">
-                        <div class="result-extra-label">Consistency</div>
+                        <div class="result-extra-label">Steadiness</div>
                         <div class="result-extra-value" id="final-consistency">100%</div>
                     </div>
                     <div class="result-extra-item">
@@ -784,34 +900,49 @@
                         <div class="result-extra-value" id="final-mistakes">0</div>
                     </div>
                     <div class="result-extra-item">
-                        <div class="result-extra-label">Keystrokes</div>
+                        <div class="result-extra-label">Uncorrected errors</div>
+                        <div class="result-extra-value result-extra-value--small" id="final-error-rate">0 (0%)</div>
+                    </div>
+                    <div class="result-extra-item">
+                        <div class="result-extra-label">Keys pressed</div>
                         <div class="result-extra-value result-extra-value--small" id="final-keystrokes">0</div>
                     </div>
                     <div class="result-extra-item">
-                        <div class="result-extra-label">Chars (C/I/T)</div>
-                        <div class="result-extra-value result-extra-value--small" id="final-characters">0/0/0</div>
-                    </div>
-                    <div class="result-extra-item">
-                        <div class="result-extra-label">Test Type</div>
-                        <div class="result-extra-value result-extra-value--small" id="final-test-type">quotes</div>
+                        <div class="result-extra-label">Letters right / wrong / total</div>
+                        <div class="result-extra-value result-extra-value--small" id="final-characters">0 / 0 / 0</div>
                     </div>
                     <div class="result-extra-item">
                         <div class="result-extra-label">Peak WPM</div>
                         <div class="result-extra-value" id="final-peak-wpm">0</div>
                     </div>
                     <div class="result-extra-item">
-                        <div class="result-extra-label">Avg WPM</div>
+                        <div class="result-extra-label">Average WPM</div>
                         <div class="result-extra-value" id="final-avg-wpm">0</div>
                     </div>
                     <div class="result-extra-item">
-                        <div class="result-extra-label">Error Rate</div>
-                        <div class="result-extra-value" id="final-error-rate">0%</div>
+                        <div class="result-extra-label">Mode</div>
+                        <div class="result-extra-value result-extra-value--small" id="final-test-type">Random words</div>
                     </div>
                 </div>
                 <canvas id="wpm-chart-result" class="wpm-chart wpm-chart--result" aria-hidden="true"></canvas>
                 <div id="run-analysis-container"></div>
+                <button class="secondary result-drill-btn" id="result-drill-btn" type="button" onclick="startDrillFromResults()" style="display:none;">Drill these keys (1 min)</button>
             </div>
         </div>
+    </div>
+</div>
+
+<!-- Level-up overlay -->
+<div class="profile-modal levelup-overlay" id="levelup-overlay" aria-hidden="true">
+    <div class="profile-modal-card levelup-card" role="dialog" aria-modal="true" aria-labelledby="levelup-content">
+        <div id="levelup-content"></div>
+    </div>
+</div>
+
+<!-- Weekly recap -->
+<div class="profile-modal weekly-recap-modal" id="weekly-recap-modal" aria-hidden="true">
+    <div class="profile-modal-card weekly-recap-card" role="dialog" aria-modal="true" aria-labelledby="weekly-recap-content">
+        <div id="weekly-recap-content"></div>
     </div>
 </div>
 
@@ -828,6 +959,7 @@
 <script src="js/app-lyra.js"></script>
 <script src="js/app-community.js"></script>
 <script src="js/app-profile.js"></script>
+<script src="js/share-card.js"></script>
 <script src="js/app-results.js"></script>
 <script src="js/app-input.js"></script>
 <script src="js/app-audio.js"></script>

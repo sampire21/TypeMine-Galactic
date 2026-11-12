@@ -5,11 +5,12 @@ import {
   userScoreKey,
   normalizeMode,
   hasStorage,
+  storageMissing,
 } from '../_lib.js';
 
 export async function onRequestGet(context) {
   const { request, env } = context;
-  if (!hasStorage(env)) return json({ error: 'Server storage not configured (TYPING_APP KV binding missing).' }, 500);
+  if (!hasStorage(env)) return storageMissing();
   const user = await getAuthUser(request, env);
   if (!user) return json({ error: 'Unauthorized' }, 401);
 
@@ -19,7 +20,7 @@ export async function onRequestGet(context) {
   const mode = modeParam ? normalizeMode(modeParam) : '';
 
   const allScores = await getJson(env, userScoreKey(user.id), []);
-  const scores = allScores
+  const scores = (Array.isArray(allScores) ? allScores : [])
     .filter((score) => !mode || score.mode === mode)
     .sort((a, b) => b.date - a.date)
     .slice(0, limit);

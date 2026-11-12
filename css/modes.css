@@ -1,1 +1,366 @@
-/* css/modes.css: styles added by the matching feature area. Loaded after styles.css. */
+/* css/modes.css: Story mode (Lyra Gate), the Story map and Orion. Loaded after styles.css.
+   Colours come from the shared tokens in styles.css (--surface, --border, --accent,
+   --accent-warm, --ease-spring); the fallbacks here only matter if a token is missing. */
+
+:root {
+    --modes-accent: var(--accent, #3fd9ec);
+    --modes-warm: var(--accent-warm, #ffb347);
+    --modes-surface: var(--surface, rgba(12, 20, 52, 0.78));
+    --modes-border: var(--border, rgba(63, 217, 236, 0.38));
+    --modes-spring: var(--ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1));
+    --modes-glow: 0 0 22px rgba(63, 217, 236, 0.22);
+}
+
+/* ---------- Glossy capsule look for the Lyra panels and the Story map ---------- */
+#lyra-gate-modal .leaderboard-modal-card,
+#sector-map-modal .leaderboard-modal-card {
+    border-radius: 28px;
+    border: 1px solid var(--modes-border);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), var(--modes-glow), 0 24px 54px rgba(0, 0, 0, 0.55);
+}
+#lyra-gate-modal.show .leaderboard-modal-card,
+#sector-map-modal.show .leaderboard-modal-card {
+    animation: modesPopIn 0.46s var(--modes-spring) both;
+}
+@keyframes modesPopIn {
+    from { transform: scale(0.86); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+.lyra-gate-wrap { border-radius: 26px; }
+.lyra-terminal-sidebar,
+.lyra-scene,
+.lyra-quote-display,
+.sector-map-wrap {
+    border-radius: 24px;
+    border: 1px solid var(--modes-border);
+    background: var(--modes-surface);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), var(--modes-glow);
+}
+.lyra-scene { background: radial-gradient(140% 120% at 50% 0%, rgba(63, 217, 236, 0.08), transparent 55%), var(--modes-surface); }
+.lyra-upgrade-card,
+.lyra-library-book,
+.lyra-specialization-option,
+.lyra-stat-card,
+.lyra-upgrade-detail {
+    border-radius: 20px;
+    border: 1px solid var(--modes-border);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02)), var(--modes-surface);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+    transition: transform 0.22s var(--modes-spring), box-shadow 0.22s ease;
+}
+.lyra-upgrade-card:hover,
+.lyra-library-book:hover,
+.lyra-specialization-option:not([disabled]):hover {
+    transform: translateY(-1px) scale(1.01);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), var(--modes-glow);
+}
+.lyra-upgrade-card.selected,
+.lyra-library-book.active,
+.lyra-specialization-option.active {
+    border-color: var(--modes-accent);
+    box-shadow: inset 0 0 0 1px var(--modes-accent), var(--modes-glow);
+}
+.lyra-sidebar-tab {
+    border-radius: 999px;
+}
+.lyra-sidebar-tab.active {
+    background: rgba(63, 217, 236, 0.14);
+    border-color: var(--modes-accent);
+    color: var(--modes-accent);
+}
+/* Buy button: amber glossy pill when you can afford it, teal glass otherwise. */
+.lyra-upgrade-buy {
+    border-radius: 999px;
+    border: 1px solid var(--modes-border);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.03)), rgba(63, 217, 236, 0.12);
+    color: var(--modes-accent);
+    font-weight: 800;
+    transition: transform 0.22s var(--modes-spring), box-shadow 0.22s ease, background 0.22s ease;
+}
+.lyra-upgrade-buy.can-afford {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 55%), var(--modes-warm);
+    border-color: rgba(255, 220, 160, 0.9);
+    color: #2a1600;
+    box-shadow: 0 0 22px rgba(255, 179, 71, 0.38), inset 0 -2px 0 rgba(0, 0, 0, 0.15);
+}
+.lyra-upgrade-buy.can-afford:hover { transform: scale(1.04); }
+.lyra-upgrade-buy[disabled] { opacity: 0.72; cursor: not-allowed; }
+.lyra-overload-trigger { border-radius: 999px; }
+.lyra-overload-trigger.ready {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 55%), var(--modes-warm);
+    color: #2a1600;
+    border-color: rgba(255, 220, 160, 0.9);
+    box-shadow: 0 0 22px rgba(255, 179, 71, 0.38);
+}
+.lyra-exit-btn { border-radius: 999px; }
+.lyra-exit-btn .lyra-exit-label { white-space: nowrap; }
+
+/* The word stream is a flex row; its words and spaces must never shrink (they scroll instead). */
+.lyra-quote-display > span { flex: 0 0 auto; min-width: auto; }
+
+/* ---------- "Words to next crystal" bar under the asteroid ---------- */
+.lyra-next-crystal {
+    position: absolute;
+    left: 50%;
+    top: calc(32% + (var(--lyra-asteroid-size, 120px) / 2) + 14px);
+    transform: translateX(-50%);
+    width: min(200px, 60%);
+    display: grid;
+    gap: 4px;
+    justify-items: center;
+    z-index: 10;
+    pointer-events: none;
+}
+.lyra-next-crystal-track {
+    display: block;
+    width: 100%;
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.12);
+    overflow: hidden;
+}
+.lyra-next-crystal-fill {
+    display: block;
+    height: 100%;
+    width: 0%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--modes-accent), var(--modes-warm));
+    transition: width 0.18s ease-out;
+}
+.lyra-next-crystal-label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--lyra-terminal-muted, #a5b3d1);
+    text-align: center;
+    white-space: nowrap;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(5, 9, 28, 0.72);
+}
+
+/* ---------- Chapter / checkpoint / sector-cleared splash (non-blocking) ---------- */
+.lyra-milestone-splash {
+    position: absolute;
+    left: 50%;
+    top: 14%;
+    transform: translate(-50%, 0);
+    z-index: 150;
+    display: grid;
+    gap: 0.3rem;
+    justify-items: center;
+    padding: 0.9rem 1.5rem;
+    border-radius: 999px;
+    border: 1px solid var(--modes-border);
+    background: var(--modes-surface);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), var(--modes-glow), 0 18px 40px rgba(0, 0, 0, 0.45);
+    text-align: center;
+    pointer-events: none;
+    animation: modesPopIn 0.46s var(--modes-spring) both;
+}
+.lyra-milestone-splash.big {
+    top: 10%;
+    border-radius: 32px;
+    padding: 1.3rem 2rem;
+    max-width: min(520px, 92%);
+}
+.lyra-milestone-splash.leaving { transition: opacity 0.35s ease, transform 0.35s ease; opacity: 0; transform: translate(-50%, -12px); }
+.lyra-milestone-title {
+    font-size: 1.25rem;
+    font-weight: 900;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--modes-accent);
+}
+.lyra-milestone-splash.big .lyra-milestone-title { font-size: 1.8rem; color: var(--modes-warm); }
+.lyra-milestone-subtitle { font-size: 0.82rem; color: var(--lyra-terminal-muted, #a5b3d1); }
+.lyra-milestone-bonus { font-size: 0.95rem; font-weight: 800; color: var(--modes-warm); }
+
+/* ---------- Story map: labels, placeholders, list view ---------- */
+.sector-node-name {
+    font-size: 15px;
+    font-weight: 800;
+    fill: #e8f7ff;
+    paint-order: stroke;
+    stroke: rgba(2, 6, 23, 0.85);
+    stroke-width: 4px;
+    stroke-linejoin: round;
+    pointer-events: none;
+}
+.sector-node-status {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    fill: var(--modes-accent);
+    paint-order: stroke;
+    stroke: rgba(2, 6, 23, 0.85);
+    stroke-width: 3px;
+    pointer-events: none;
+}
+.sector-node.is-locked .sector-node-status { fill: #a5b3d1; }
+.sector-node-status.is-cleared { fill: #86efac; }
+.sector-node.is-unlocked .node-core { stroke: var(--modes-accent); stroke-width: 2.4; }
+.sector-node.is-placeholder { opacity: 0.55; cursor: default; }
+.sector-node.is-placeholder .sector-node-name { fill: #b8c2d8; }
+.sector-map-list { display: none; }
+.sector-list-item {
+    display: grid;
+    grid-template-columns: 34px 1fr auto;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    min-height: 60px;
+    padding: 0.6rem 0.9rem;
+    border-radius: 999px;
+    border: 1px solid var(--modes-border);
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.02)), var(--modes-surface);
+    color: #e8f7ff;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+.sector-list-item.is-ready { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), var(--modes-glow); }
+.sector-list-item.is-locked { opacity: 0.8; }
+.sector-list-item.is-placeholder { opacity: 0.5; cursor: default; }
+.sector-list-orb {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #ffffff 0%, var(--modes-accent) 35%, rgba(10, 60, 90, 0.9) 100%);
+    box-shadow: 0 0 0 2px rgba(63, 217, 236, 0.5), 0 0 14px rgba(63, 217, 236, 0.5);
+}
+.sector-list-item.is-locked .sector-list-orb,
+.sector-list-item.is-placeholder .sector-list-orb {
+    background: radial-gradient(circle at 35% 30%, #d7dbe6 0%, #6b7280 40%, #2b2f3d 100%);
+    box-shadow: 0 0 0 2px rgba(148, 163, 184, 0.4);
+}
+.sector-list-text { display: grid; gap: 2px; min-width: 0; }
+.sector-list-text strong { font-size: 0.98rem; }
+.sector-list-text span { font-size: 0.78rem; color: var(--lyra-terminal-muted, #a5b3d1); }
+.sector-list-status {
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--modes-accent);
+    white-space: nowrap;
+}
+.sector-list-item.is-locked .sector-list-status,
+.sector-list-item.is-placeholder .sector-list-status { color: #a5b3d1; }
+.sector-list-item.is-cleared .sector-list-status { color: #86efac; }
+
+/* ---------- Reduced motion (system setting) or Effects turned off ---------- */
+.lyra-reduced-motion .lyra-star,
+.lyra-reduced-motion .sector-star,
+.lyra-reduced-motion .sector-grid-pulse,
+.lyra-reduced-motion .sector-node .node-halo,
+.lyra-reduced-motion .lyra-ship,
+.lyra-reduced-motion .lyra-scene.crit-shake,
+.lyra-reduced-motion .lyra-asteroid,
+.lyra-reduced-motion .lyra-drone-thruster,
+.lyra-reduced-motion .lyra-milestone-splash,
+.lyra-reduced-motion.show .leaderboard-modal-card,
+.lyra-reduced-motion .sector-map-wrap::before,
+.lyra-reduced-motion .sector-map-wrap::after,
+.lyra-reduced-motion #sector-map-stars,
+.lyra-reduced-motion #sector-map-links,
+.lyra-reduced-motion #sector-map-nodes,
+.lyra-reduced-motion .sector-map-svg {
+    animation: none !important;
+}
+.lyra-reduced-motion .lyra-star,
+.lyra-reduced-motion .sector-star { opacity: 0.45; }
+.lyra-reduced-motion .lyra-stars-layer { transform: none !important; transition: none; }
+@media (prefers-reduced-motion: reduce) {
+    .lyra-star, .sector-star, .sector-grid-pulse, .sector-node .node-halo, .lyra-ship,
+    .lyra-scene.crit-shake, .lyra-milestone-splash, .lyra-drone-thruster,
+    #lyra-gate-modal.show .leaderboard-modal-card, #sector-map-modal.show .leaderboard-modal-card,
+    .lyra-upgrade-card, .lyra-upgrade-buy, .lyra-next-crystal-fill { animation: none !important; transition: none !important; }
+}
+
+/* ---------- Drones move with a transform only ---------- */
+.lyra-drone { left: 0; top: 0; filter: none; will-change: transform; }
+.lyra-drone .lyra-drone-core { box-shadow: 0 0 10px rgba(125, 211, 252, 0.45); }
+
+/* ---------- Tablet and phone: one column that scrolls ---------- */
+@media (max-width: 768px) {
+    #lyra-gate-modal { padding: 0; align-items: stretch; }
+    #lyra-gate-modal .leaderboard-modal-card {
+        width: 100vw;
+        height: 100vh;
+        height: 100dvh;
+        max-height: none;
+        border-radius: 0;
+        border-left: 0;
+        border-right: 0;
+        padding: 0.5rem 0.5rem 1.2rem;
+        overflow-y: auto;
+        overflow-x: hidden;
+        -webkit-overflow-scrolling: touch;
+    }
+    #lyra-gate-modal .leaderboard-modal-header { flex-wrap: wrap; gap: 0.4rem 0.6rem; }
+    #lyra-gate-modal .leaderboard-modal-title { min-width: 0 !important; }
+    .lyra-global-stats { gap: 0.7rem; font-size: 0.7rem; }
+    .lyra-exit-btn { padding: 0.4rem 0.7rem; font-size: 0.78rem; margin-left: auto; }
+    .lyra-gate-wrap,
+    .lyra-gate-wrap * { min-width: 0; }
+    .lyra-gate-wrap {
+        height: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+        padding: 0.6rem;
+        overflow: visible;
+    }
+    .lyra-hud { order: 0; flex-wrap: wrap; font-size: 0.64rem; letter-spacing: 0.08em; }
+    .lyra-main-layout { display: contents; }
+    .lyra-play-panel { order: 1; width: 100%; }
+    .lyra-combat-hud { padding: 0; }
+    .lyra-scene { min-height: 240px; height: 44vh; max-height: 380px; }
+    .lyra-typing-bay { order: 2; padding: 0; }
+    .lyra-terminal-sidebar { order: 3; height: auto; min-height: 0; overflow: visible; display: grid; grid-template-rows: auto auto auto; }
+    .lyra-sidebar-panels { min-height: 0; height: auto; overflow: visible; }
+    .lyra-sidebar-panel { position: static; display: none; opacity: 1; visibility: visible; pointer-events: auto; }
+    .lyra-sidebar-panel.active { display: grid; }
+    .lyra-sidebar-tabs { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+    .lyra-upgrade-list { grid-template-columns: 1fr; }
+    .lyra-overload-wrap {
+        position: absolute;
+        left: 8px;
+        bottom: 8px;
+        justify-self: start;
+        margin: 0;
+        transform: scale(0.78);
+        transform-origin: left bottom;
+        grid-template-columns: 120px;
+        padding: 0.45rem;
+    }
+    .lyra-scene-readout { flex-wrap: wrap; gap: 0.3rem; }
+    .lyra-scene-pill { padding: 0.3rem 0.5rem; font-size: 0.68rem; }
+    .lyra-asteroid-wrap { top: 28%; }
+    .lyra-next-crystal { width: min(170px, 58%); top: calc(28% + (var(--lyra-asteroid-size, 120px) / 2) + 12px); }
+    .lyra-scene-readout { right: 8px; left: 8px; }
+    .lyra-scene-pill span { font-size: 0.6rem; }
+    .lyra-ship { right: 10%; bottom: 10px; width: 64px; height: 64px; }
+    .lyra-quote-display { height: 84px; min-height: 84px; font-size: 1.05rem; padding: 0.75rem 0.8rem; }
+    .lyra-typing-bay .lyra-quote-display { min-height: 84px; }
+    .lyra-story-footer { flex-wrap: wrap; gap: 0.5rem; padding: 0.4rem 0.2rem 0; }
+    .lyra-story-meta { font-size: 0.74rem; flex: 1 1 100%; }
+    .lyra-clear-splash { padding: 1rem; }
+    .lyra-clear-title { font-size: 1.5rem; text-align: center; }
+    .lyra-clear-actions { flex-wrap: wrap; justify-content: center; }
+}
+@media (max-width: 640px) {
+    #sector-map-modal .sector-map-wrap { display: none; }
+    #sector-map-modal .sector-map-list { display: grid; gap: 0.55rem; padding: 0.2rem 0 0.4rem; }
+    #sector-map-modal .leaderboard-modal-card { width: 100%; }
+}
+@media (max-width: 420px) {
+    .lyra-global-stats { gap: 0.5rem; font-size: 0.66rem; }
+    .lyra-exit-btn { padding: 0.35rem 0.6rem; }
+    .lyra-scene { height: 40vh; min-height: 220px; }
+    .lyra-overload-wrap { transform: scale(0.68); }
+    .lyra-next-crystal-label { font-size: 0.62rem; }
+    .lyra-scene-readout .lyra-scene-pill:nth-child(3) { display: none; }
+}

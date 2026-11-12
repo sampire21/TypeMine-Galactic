@@ -1,25 +1,28 @@
-import { json, normalizeUsername, getJson, hasStorage } from './_lib.js';
-
-function parseJsonSafe(raw, fallback) {
-  try {
-    const parsed = JSON.parse(raw || '');
-    return parsed == null ? fallback : parsed;
-  } catch {
-    return fallback;
-  }
-}
-
-function dailyCompletionsTotal(dailyObj) {
-  if (!dailyObj || typeof dailyObj !== 'object') return 0;
-  if (Array.isArray(dailyObj.completions)) return dailyObj.completions.length;
-  const days = dailyObj.days && typeof dailyObj.days === 'object' ? dailyObj.days : {};
-  return Object.values(days).reduce((sum, row) => {
-    const completions = Array.isArray(row)
-      ? row
-      : (row && Array.isArray(row.completions) ? row.completions : []);
-    return sum + completions.length;
-  }, 0);
-}
+import {
+  json,
+  normalizeUsername,
+  getJson,
+  hasStorage,
+  storageMissing,
+  progressKey,
+  progressOf,
+  parseJsonSafe,
+  dailyCompletionsTotal,
+  xpOf,
+  levelFromXp,
+  streakOf,
+  contributionTotalKey,
+  allTimeBestKey,
+  weeklyBestKey,
+  getWeekKeyUtc,
+  communityContributionKey,
+  userScoreKey,
+  KNOWN_MODES,
+  getClientIp,
+  safeRateKeyPart,
+  incrementRateLimit,
+  rateLimited,
+} from './_lib.js';
 
 function weeklyCompletionsCount(weeklyObj) {
   if (!weeklyObj || typeof weeklyObj !== 'object') return 0;
@@ -27,38 +30,13 @@ function weeklyCompletionsCount(weeklyObj) {
   return completions.length;
 }
 
-async function getCommunityContributionTotal(env, userId, usernameNorm) {
-  let total = 0;
-  let cursor = undefined;
-  const targetId = `user:${userId}`;
-  do {
-    const page = await env.TYPING_APP.list({ prefix: 'community-contrib:v1:', cursor, limit: 1000 });
-    const keys = Array.isArray(page && page.keys) ? page.keys : [];
-    for (const entry of keys) {
-      const keyName = String(entry && entry.name || '');
-      if (!keyName) continue;
-      const payload = await getJson(env, keyName, null);
-      const rows = payload && payload.entries && typeof payload.entries === 'object' ? payload.entries : {};
-      const direct = rows[targetId];
-      if (direct && Number.isFinite(Number(direct.damage))) {
-        total += Math.max(0, Math.floor(Number(direct.damage) || 0));
-        continue;
-      }
-      if (!usernameNorm) continue;
-      for (const row of Object.values(rows)) {
-        const rowName = normalizeUsername(row && row.username || '');
-        if (!rowName || rowName !== usernameNorm) continue;
-        total += Math.max(0, Math.floor(Number(row && row.damage) || 0));
-      }
-    }
-    cursor = page && page.list_complete ? undefined : (page && page.cursor ? page.cursor : undefined);
-  } while (cursor);
-  return total;
-}
-
 export async function onRequestGet(context) {
   const { request, env } = context;
-  if (!hasStorage(env)) return json({ error: 'Server storage not configured (TYPING_APP KV binding missing).' }, 500);
+  if (!hasStorage(env)) return storageMissing();
+
+  const ip = safeRateKeyPart(getClientIp(request), 'unknown');
+  const rate = await incrementRateLimit(env, `rate:usersummary:ip:${ip}`, 60 * 10);
+  if (rate.count > 120) return rateLimited('Too many profile lookups. Please slow down.', rate.retryAfterSec);
 
   const url = new URL(request.url);
   const usernameRaw = String(url.searchParams.get('username') || '').trim();
@@ -70,10 +48,8 @@ export async function onRequestGet(context) {
   const user = await getJson(env, `user:${userId}`, null);
   if (!user) return json({ error: 'User not found' }, 404);
 
-  const progressPayload = await getJson(env, `progress:user:${userId}`, { progress: {} });
-  const progress = (progressPayload && progressPayload.progress && typeof progressPayload.progress === 'object')
-    ? progressPayload.progress
-    : {};
+  const progressPayload = await getJson(env, progressKey(userId), { progress: {} });
+  const progress = progressOf(progressPayload);
   const badgesRaw = parseJsonSafe(progress['sampire-badges'] || '[]', []);
   const badgeIds = (Array.isArray(badgesRaw) ? badgesRaw : [])
     .map((b) => (typeof b === 'string' ? b : String(b && b.id || '')))
@@ -84,21 +60,56 @@ export async function onRequestGet(context) {
   const dailyTotal = dailyCompletionsTotal(parseJsonSafe(progress['sampire-daily-v2'] || '{}', {}));
   const weeklyCount = weeklyCompletionsCount(parseJsonSafe(progress['sampire-weekly'] || '{}', {}));
   const lifetimeChallengesCompleted = Math.max(lifetimeStored, dailyTotal + weeklyCount);
-  const xp = Math.max(0, parseInt(progress['sampire-xp'] || '0', 10) || 0);
-  const level = Math.max(1, Math.floor(xp / 500) + 1);
+  const xp = xpOf(progress);
+  const level = levelFromXp(xp);
 
-  const scores = await getJson(env, `scores:user:${userId}`, []);
-  const personalBestWpm = Array.isArray(scores) && scores.length
-    ? Math.max(0, ...scores.map((row) => Math.max(0, Number(row && row.wpm) || 0)))
-    : 0;
-  const communityContributionTotal = await getCommunityContributionTotal(env, userId, user.usernameNorm || usernameNorm);
+  // Bests come from the per-mode best keys (direct reads, no list()).
+  const weekKey = getWeekKeyUtc();
+  let personalBestWpm = 0;
+  let weeklyBestWpm = 0;
+  const bestByMode = {};
+  for (const mode of KNOWN_MODES) {
+    const row = await getJson(env, allTimeBestKey(mode, userId), null);
+    if (row && Number(row.wpm) > 0) {
+      bestByMode[mode] = Number(row.wpm);
+      personalBestWpm = Math.max(personalBestWpm, Number(row.wpm));
+    }
+    const weekRow = await getJson(env, weeklyBestKey(weekKey, mode, userId), null);
+    if (weekRow && Number(weekRow.wpm) > weeklyBestWpm) weeklyBestWpm = Number(weekRow.wpm);
+  }
+  const totalState = await getJson(env, contributionTotalKey(userId), { words: 0 });
+  const communityContributionTotal = Math.max(0, Math.floor(Number(totalState && totalState.words) || 0));
+
+  // Recent runs (last 50, flagged ones excluded) for averages.
+  const recentRaw = await getJson(env, userScoreKey(userId), []);
+  const recent = (Array.isArray(recentRaw) ? recentRaw : []).filter((r) => r && !r.flagged && Number(r.wpm) > 0);
+  const runs = recent.length;
+  const round1 = (v) => Math.round(v * 10) / 10;
+  const averageWpm = runs ? round1(recent.reduce((sum, r) => sum + (Number(r.wpm) || 0), 0) / runs) : 0;
+  const averageAccuracy = runs ? round1(recent.reduce((sum, r) => sum + (Number(r.accuracy) || 0), 0) / runs) : 0;
+
+  // Words typed toward this week's team goal.
+  const weekState = await getJson(env, communityContributionKey(weekKey), null);
+  const weekEntry = weekState && weekState.entries ? weekState.entries[`user:${userId}`] : null;
+  let wordsThisWeek = Math.max(0, Math.floor(Number(weekEntry && weekEntry.damage) || 0));
+  const weeklyWords = parseJsonSafe(progress['sampire-weekly-words'] || 'null', null);
+  if (weeklyWords && String(weeklyWords.week || '') === weekKey) wordsThisWeek = Math.max(wordsThisWeek, Math.floor(Number(weeklyWords.words) || 0));
 
   return json({
     username: user.username,
+    createdAt: Number(user.createdAt) || null,
     badgeIds: badgeUnique,
     lifetimeChallengesCompleted,
     level,
+    streak: streakOf(progress),
     personalBestWpm,
+    weeklyBestWpm,
+    bestByMode,
+    averageWpm,
+    averageAccuracy,
+    runs,
+    wordsThisWeek,
+    weekKey,
     communityContributionTotal,
   }, 200);
 }

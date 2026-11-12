@@ -3,73 +3,47 @@ import {
   readJson,
   normalizeUsername,
   hashPassword,
+  burnPasswordHashTime,
   getSecret,
   publicUser,
-  putJson,
   getJson,
   hasStorage,
-  looksLikeEmptyAuthNamespace,
-  markStorageReady,
+  storageMissing,
   getClientIp,
   safeRateKeyPart,
   incrementRateLimit,
+  rateLimited,
   constantTimeEqual,
   mintSessionTokens,
-  buildAccessSessionCookie,
-  buildRefreshSessionCookie,
+  sessionCookieHeaders,
+  touchLastSeen,
+  PASSWORD_MAX_LENGTH,
 } from './_lib.js';
 
 export async function onRequestPost(context) {
   const { request, env } = context;
-  const requestId = context.requestId || request.headers.get('cf-ray') || crypto.randomUUID();
-  if (!hasStorage(env)) return json({ error: 'Server storage not configured (TYPING_APP KV binding missing).' }, 500);
+  if (!hasStorage(env)) return storageMissing();
   const body = await readJson(request);
   const usernameNorm = normalizeUsername(body.username);
-  const password = String(body.password || '');
+  const password = String(body.password || '').slice(0, PASSWORD_MAX_LENGTH);
   const ip = safeRateKeyPart(getClientIp(request), 'unknown');
   const ipRate = await incrementRateLimit(env, `rate:login:ip:${ip}`, 60 * 10);
-  if (ipRate.count > 30) {
-    return json({
-      error: 'Too many login attempts. Please try again later.',
-      code: 'RATE_LIMITED',
-      retryAfter: ipRate.retryAfterSec,
-    }, 429);
-  }
+  if (ipRate.count > 30) return rateLimited('Too many login attempts. Please try again later.', ipRate.retryAfterSec);
+
   // Per-username limit is keyed by username + client IP and counts FAILED attempts only,
   // so a third party cannot lock a victim out from other IPs.
   const failKey = `rate:login:fail:${safeRateKeyPart(usernameNorm, 'unknown')}:${ip}`;
   const failState = await getJson(env, failKey, null);
   if (failState && Number(failState.resetAt) > Date.now() && Number(failState.count) >= 12) {
-    return json({
-      error: 'Too many login attempts for this account. Please try again later.',
-      code: 'RATE_LIMITED',
-      retryAfter: Math.max(1, Math.ceil((Number(failState.resetAt) - Date.now()) / 1000)),
-    }, 429);
+    return rateLimited('Too many login attempts for this account. Please try again later.', Math.max(1, Math.ceil((Number(failState.resetAt) - Date.now()) / 1000)));
   }
   const recordFailure = () => incrementRateLimit(env, failKey, 60 * 10);
 
-  const userId = await env.TYPING_APP.get(`userByName:${usernameNorm}`);
-  if (!userId) {
-    const kvLikelyEmpty = await looksLikeEmptyAuthNamespace(env);
-    if (kvLikelyEmpty) {
-      console.error('[auth-kv-misconfig]', {
-        requestId,
-        method: 'POST',
-        path: '/api/login',
-        usernameNorm,
-      });
-      return json({
-        error: 'Authentication storage appears empty or misconfigured. Verify KV namespace IDs/binding.',
-        code: 'KV_NAMESPACE_EMPTY_OR_MISMATCH',
-        requestId,
-      }, 503);
-    }
-    await recordFailure();
-    return json({ error: 'Invalid username or password' }, 401);
-  }
-
-  const userRaw = await env.TYPING_APP.get(`user:${userId}`);
+  const userId = usernameNorm ? await env.TYPING_APP.get(`userByName:${usernameNorm}`) : null;
+  const userRaw = userId ? await env.TYPING_APP.get(`user:${userId}`) : null;
   if (!userRaw) {
+    // Hash anyway so a missing account takes as long as a wrong password.
+    await burnPasswordHashTime(password);
     await recordFailure();
     return json({ error: 'Invalid username or password' }, 401);
   }
@@ -81,15 +55,9 @@ export async function onRequestPost(context) {
     return json({ error: 'Invalid username or password' }, 401);
   }
 
-  const now = Date.now();
-  user.lastLoginAt = now;
-  user.lastSeenAt = now;
-  await putJson(env, `user:${user.id}`, user);
-  await markStorageReady(env);
+  // The user record is not rewritten on login; "last seen" lives in its own small key.
+  await touchLastSeen(env, user.id);
 
   const tokenSet = await mintSessionTokens(env, user.id, getSecret(env));
-  const headers = new Headers();
-  headers.append('set-cookie', buildAccessSessionCookie(request, tokenSet.accessToken));
-  headers.append('set-cookie', buildRefreshSessionCookie(request, tokenSet.refreshToken));
-  return json({ user: publicUser(user) }, 200, headers);
+  return json({ user: publicUser(user, env) }, 200, sessionCookieHeaders(request, tokenSet));
 }

@@ -32,6 +32,11 @@
         return Math.round((correctChars / 5) / (activeSec / 60));
     }
     function calcAccuracy(correct, total) { return total > 0 ? Math.round((correct / total) * 1000) / 10 : 100; }
+    // XP for a finished run, scaled to sit alongside challenge rewards (5 to 300).
+    function xpForResult(r) {
+        r = r || {};
+        return Math.min(300, Math.max(5, Math.round((Number(r.score) || 0) / 10 + (Number(r.wave) || 0) * 15 + (Number(r.wordsDestroyed) || 0))));
+    }
 
     // Closest to station = largest y (station at bottom). Candidates must start with letter and be untyped.
     function selectTarget(words, letter) {
@@ -83,6 +88,12 @@
 '#orion-mode .om-panel.show{display:flex}' +
 '#orion-mode .om-panel h2{font-size:clamp(1.8rem,5vw,3rem);color:var(--lyra-terminal-accent,#66e9ff);text-shadow:0 0 22px rgba(102,233,255,.5);letter-spacing:.1em}' +
 '#orion-mode .om-panel p{color:var(--lyra-terminal-muted,#a5b3d1)}' +
+'#orion-mode .om-card{display:grid;gap:.55rem;min-width:min(92vw,360px);padding:1.1rem 1.3rem;border-radius:26px;border:1px solid var(--border,rgba(63,217,236,.4));background:var(--surface,rgba(10,16,44,.82));box-shadow:0 0 0 1px rgba(63,217,236,.12) inset,0 18px 40px rgba(0,0,0,.45),0 0 28px rgba(63,217,236,.18);animation:omPop .42s var(--ease-spring,cubic-bezier(.34,1.56,.64,1)) both}' +
+'@keyframes omPop{from{transform:scale(.86);opacity:0}to{transform:scale(1);opacity:1}}' +
+'#orion-mode .om-card dl{display:grid;grid-template-columns:1fr auto;gap:.3rem .9rem;margin:0;text-align:left;font-size:.95rem}' +
+'#orion-mode .om-card dt{color:var(--lyra-terminal-muted,#a5b3d1)}#orion-mode .om-card dd{margin:0;font-weight:800;color:var(--accent,#3fd9ec)}' +
+'#orion-mode .om-card dd.om-xp{color:var(--accent-warm,#ffb347)}' +
+'#orion-mode .om-card .om-newbest{color:var(--accent-warm,#ffb347);font-weight:800;letter-spacing:.06em;text-transform:uppercase;font-size:.78rem}' +
 '#orion-mode .om-row{display:flex;gap:.8rem;flex-wrap:wrap;justify-content:center}' +
 '#orion-mode .om-wave{pointer-events:none;background:transparent}' +
 '#orion-mode .om-wave h2{color:var(--lyra-terminal-accent-2,#f8c660);text-shadow:0 0 26px rgba(248,198,96,.5)}' +
@@ -118,7 +129,10 @@
 '<canvas></canvas><input class="om-input" data-r="input" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Typing input">' +
 '<div class="om-panel om-wave" data-r="wavep"><h2 data-r="wavet"></h2><p data-r="wavesub"></p></div>' +
 '<div class="om-panel" data-r="pausep"><h2>Paused</h2><div class="om-row"><button class="om-btn" data-r="resume" type="button">Resume</button><button class="om-btn" data-r="exit1" type="button">Exit</button></div></div>' +
-'<div class="om-panel" data-r="overp"><h2>Bulwark Breached</h2><p data-r="overt"></p><div class="om-row"><button class="om-btn" data-r="retry" type="button">Retry</button><button class="om-btn" data-r="exit2" type="button">Exit</button></div></div>';
+'<div class="om-panel" data-r="overp"><div class="om-card"><h2>Station overrun</h2><p>Your run is over. Here is how it went.</p>' +
+'<dl><dt>Wave reached</dt><dd data-r="rwave">1</dd><dt>Score</dt><dd data-r="rscore">0</dd><dt>Speed</dt><dd data-r="rwpm">0 WPM</dd><dt>Accuracy</dt><dd data-r="racc">100%</dd><dt>XP earned</dt><dd class="om-xp" data-r="rxp">0</dd></dl>' +
+'<div class="om-newbest" data-r="rbest" hidden>New best score</div>' +
+'<div class="om-row"><button class="om-btn" data-r="retry" type="button">Play again</button><button class="om-btn" data-r="exit2" type="button">Leave</button></div></div></div>';
         document.body.appendChild(el);
         var R = {};
         [].forEach.call(el.querySelectorAll('[data-r]'), function (n) { R[n.getAttribute('data-r')] = n; });
@@ -127,7 +141,7 @@
 
         S = {
             el: el, R: R, canvas: canvas, ctx: ctx, opts: opts, reduced: reduced, best: best,
-            pool: cleanPool(opts.wordPool), listeners: [], raf: 0, timers: [], last: 0,
+            pool: cleanPool(opts.wordPool || root.WORD_LIST), listeners: [], raf: 0, last: 0,
             w: 0, h: 0, dpr: 1, stars: [], closed: false
         };
         var s = S;
@@ -181,15 +195,31 @@
         }
         function gameOver() {
             s.over = true; s.state = 'over'; s.lock = null;
+            var wasBest = s.score > 0 && s.score >= s.best;
             saveBest();
             var r = result();
-            R.overt.textContent = 'Score ' + r.score + ' | Wave ' + r.wave + ' | ' + r.wpm + ' WPM | ' + r.accuracy + '% accuracy' + (s.score >= s.best && s.score > 0 ? ' | New best!' : '');
-            R.overp.classList.add('show');
+            var xp = null;
             if (!s.completed) {
                 s.completed = true;
-                try { if (typeof s.opts.onRunComplete === 'function') s.opts.onRunComplete(r); } catch (e) { console.error(e); }
+                // The caller (or the default handler in app-lyra.js) awards XP and may report it back.
+                var handler = typeof s.opts.onRunComplete === 'function' ? s.opts.onRunComplete : root.handleOrionRunComplete;
+                try {
+                    var reward = typeof handler === 'function' ? handler(r) : null;
+                    if (typeof reward === 'number') xp = reward;
+                    else if (reward && typeof reward.xp === 'number') xp = reward.xp;
+                } catch (e) { console.error(e); }
             }
+            if (xp == null) xp = xpForResult(r);
+            R.rwave.textContent = r.wave; R.rscore.textContent = r.score;
+            R.rwpm.textContent = r.wpm + ' WPM'; R.racc.textContent = r.accuracy + '%';
+            R.rxp.textContent = '+' + xp;
+            R.rbest.hidden = !wasBest;
+            R.overp.classList.add('show');
+            try { R.retry.focus({ preventScroll: true }); } catch (e) {}
             hud();
+            if (typeof AdaptivePractice !== 'undefined' && AdaptivePractice && typeof AdaptivePractice.commitRun === 'function') {
+                try { AdaptivePractice.commitRun(); } catch (e) {}
+            }
         }
         function damage(n) {
             s.shield = Math.max(0, s.shield - n); s.hit = 0.25;
@@ -211,7 +241,9 @@
                 s.lock = t;
             }
             var w = s.lock;
-            if (w.text.charAt(w.typed) !== ch) { miss(); return; }
+            var expected = w.text.charAt(w.typed);
+            recordKey(expected, ch);
+            if (expected !== ch) { miss(); return; }
             w.typed++; s.correct++; s.total++; w.flash = 0.1;
             tick(ch);
             s.lasers.push({ x: s.w / 2, y: s.h - 40, tx: w.x, ty: w.y, life: 0.12 });
@@ -226,6 +258,19 @@
             hud();
         }
         function release() { s.lock = null; }
+        // Weak-key tracking, same shape as the main typing test.
+        var lastKeyAt = 0;
+        function recordKey(expected, typed) {
+            var now = performance.now();
+            var ap = root.AdaptivePractice;
+            if (ap && typeof ap.recordKeystroke === 'function' && /[a-z]/.test(expected)) {
+                try {
+                    ap.recordKeystroke({ expected: expected, typed: typed, prevChar: s.lock && s.lock.typed > 0 ? s.lock.text.charAt(s.lock.typed - 1) : ' ',
+                        msSincePrev: lastKeyAt ? now - lastKeyAt : null });
+                } catch (e) {}
+            }
+            lastKeyAt = now;
+        }
         function pause(p) {
             if (s.over || s.state === 'interstitial' && p === false && !s.paused) return;
             s.paused = p;
@@ -267,7 +312,6 @@
             if (performance.now() - lastKeydownAt < 40) return; // already handled by keydown
             for (var i = 0; i < v.length; i++) charIn(v.charAt(i));
         });
-        on(R.input, 'keydown', function () {});
         on(el, 'pointerdown', function () { if (!s.paused && !s.over) focusInput(); });
         on(document, 'visibilitychange', function () { if (document.hidden && !s.over && !s.paused) pause(true); });
         on(root, 'blur', function () { if (!s.over && !s.paused) pause(true); });
@@ -350,7 +394,7 @@
             x.globalAlpha = 1;
             // station
             var cx = W / 2, sy = H - 40;
-            x.shadowColor = s.hit > 0 ? '#ff4d6d' : '#66e9ff'; x.shadowBlur = 18;
+            x.shadowColor = s.hit > 0 ? '#ff4d6d' : '#66e9ff'; x.shadowBlur = s.reduced ? 0 : 18;
             x.strokeStyle = s.hit > 0 ? '#ff4d6d' : '#66e9ff'; x.fillStyle = 'rgba(102,233,255,.12)'; x.lineWidth = 2;
             x.beginPath(); x.moveTo(cx - 40, H - 8); x.lineTo(cx - 22, sy); x.lineTo(cx, sy - 14); x.lineTo(cx + 22, sy); x.lineTo(cx + 40, H - 8); x.closePath(); x.fill(); x.stroke();
             // lasers
@@ -362,7 +406,7 @@
                 var size = w.dread ? 24 : 20;
                 x.font = '700 ' + size + 'px "Nunito","Segoe UI",monospace';
                 var tw = x.measureText(w.text).width, locked = s === S && s.lock === w;
-                x.shadowBlur = locked ? 20 : 8; x.shadowColor = w.dread ? '#f8c660' : (locked ? '#f8c660' : '#7c6ff7');
+                x.shadowBlur = s.reduced ? 0 : (locked ? 20 : 0); x.shadowColor = w.dread ? '#f8c660' : (locked ? '#f8c660' : '#7c6ff7');
                 x.fillStyle = 'rgba(12,10,34,.78)';
                 x.fillRect(w.x - tw / 2 - 8, w.y - size / 2 - 5, tw + 16, size + 10);
                 x.strokeStyle = locked ? '#f8c660' : (w.dread ? '#ff4d6d' : 'rgba(107,168,255,.5)');
@@ -400,7 +444,7 @@
         R.best.textContent = s.best;
         focusInput();
         s.raf = root.requestAnimationFrame(frame);
-        toast('Orion Bulwark online. Esc to pause.', 'info');
+        toast('Orion Bulwark: type the falling words before they reach you. Esc pauses.', 'info');
     }
 
     function close(silent) {
@@ -408,7 +452,6 @@
         if (!s) return;
         s.closed = true; S = null;
         if (s.raf) root.cancelAnimationFrame(s.raf);
-        s.timers.forEach(function (t) { clearTimeout(t); });
         s.listeners.forEach(function (l) { l[0].removeEventListener(l[1], l[2], l[3]); });
         s.listeners.length = 0;
         if (s.el.parentNode) s.el.parentNode.removeChild(s.el);
@@ -421,8 +464,9 @@
         _internal: {
             waveConfig: waveConfig, isDreadnought: isDreadnought, comboAfterClean: comboAfterClean,
             comboAfterMiss: comboAfterMiss, scoreForWord: scoreForWord, selectTarget: selectTarget,
-            calcWpm: calcWpm, calcAccuracy: calcAccuracy, clampDt: clampDt, cleanPool: cleanPool
-        }
+            calcWpm: calcWpm, calcAccuracy: calcAccuracy, clampDt: clampDt, cleanPool: cleanPool, xpForResult: xpForResult
+        },
+        xpForResult: xpForResult
     };
     root.OrionMode = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

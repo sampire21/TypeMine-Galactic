@@ -1,313 +1,453 @@
+// Local server: a thin adapter that runs the SAME /api handlers as the Cloudflare Worker
+// (functions/api/*.js through worker.js) on top of an in-memory KV store saved to
+// data/app-data.json, plus a static file server that stands in for Cloudflare's asset host.
+//
+//   node server.js            -> http://localhost:3000
+//   PORT=3001 node server.js  -> http://localhost:3001
+//
+// Environment:
+//   TYPING_TEST_TOKEN_SECRET (or TOKEN_SECRET)  signs login cookies; random per start if unset (sessions then die on restart)
+//   ADMIN_USERNAME / ADMIN_USER_ID              who gets the admin panel
+//   DATA_FILE                                   where accounts and scores are saved (default data/app-data.json)
+//   TRUST_PROXY=1                               honour x-forwarded-for / x-forwarded-proto (behind a reverse proxy)
+//   ASSET_CACHE=long|short                      long = cache assets a year; default short (revalidate), long when NODE_ENV=production
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const crypto = require('crypto');
+const { pathToFileURL } = require('url');
 
-const PORT = 3000;
-const DATA_DIR = path.join(__dirname, 'data');
-const DATA_FILE = path.join(DATA_DIR, 'app-data.json');
-const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
-const TOKEN_SECRET = process.env.TYPING_TEST_TOKEN_SECRET || 'change-me-in-production';
+const ROOT = __dirname;
+const DEFAULT_PORT = 3000;
+const MAX_API_BODY_BYTES = 1024 * 1024;
 
 const MIME = {
-    '.html': 'text/html',
-    '.css': 'text/css',
-    '.js': 'application/javascript',
-    '.json': 'application/json',
+    '.html': 'text/html; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    '.js': 'application/javascript; charset=utf-8',
+    '.mjs': 'application/javascript; charset=utf-8',
+    '.json': 'application/json; charset=utf-8',
+    '.webmanifest': 'application/manifest+json; charset=utf-8',
+    '.txt': 'text/plain; charset=utf-8',
+    '.xml': 'application/xml; charset=utf-8',
+    '.svg': 'image/svg+xml',
     '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
     '.ico': 'image/x-icon',
     '.wav': 'audio/wav',
     '.mp3': 'audio/mpeg',
     '.ogg': 'audio/ogg',
     '.m4a': 'audio/mp4',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
+    '.ttf': 'font/ttf',
 };
+const COMPRESSIBLE = new Set(['.html', '.css', '.js', '.mjs', '.json', '.webmanifest', '.txt', '.xml', '.svg']);
+const MIN_COMPRESS_BYTES = 1024;
 
-function ensureDataStore() {
-    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    if (!fs.existsSync(DATA_FILE)) {
-        const initial = { users: [], scores: [] };
-        fs.writeFileSync(DATA_FILE, JSON.stringify(initial, null, 2), 'utf8');
+// Never served, even though they sit in the project folder.
+const BLOCKED_PREFIXES = ['server.js', 'worker.js', 'functions', 'tests', 'test-results', 'docker', 'node_modules', 'data', '.git', 'playwright.config.js', 'progress.md'];
+const BLOCKED_SUFFIXES = ['.md', '.toml', '.log'];
+const BLOCKED_NAMES = ['package.json', 'package-lock.json', 'Dockerfile', '.assetsignore', '.wranglerignore', '.gitignore', '.env'];
+
+function isBlockedPath(relative) {
+    const rel = relative.split(path.sep).join('/');
+    if (!rel) return false;
+    const first = rel.split('/')[0];
+    if (first.startsWith('.')) return true;
+    if (BLOCKED_PREFIXES.includes(first)) return true;
+    if (rel.split('/').some((part) => part.startsWith('.'))) return true;
+    const base = path.posix.basename(rel);
+    if (BLOCKED_NAMES.includes(base)) return true;
+    if (base.startsWith('.env')) return true;
+    return BLOCKED_SUFFIXES.some((suffix) => rel.toLowerCase().endsWith(suffix));
+}
+
+// ---------------------------------------------------------------------------
+// In-memory KV with the subset of the Cloudflare KV API the handlers use.
+// ---------------------------------------------------------------------------
+class MemoryKV {
+    constructor(filePath = null) {
+        this.filePath = filePath;
+        this.store = new Map(); // key -> { value: string, metadata: any, expiration: seconds|null }
+        this.saveTimer = null;
+        this.dirty = false;
+        if (filePath) this.load();
+    }
+
+    load() {
+        try {
+            if (!fs.existsSync(this.filePath)) return;
+            const parsed = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
+            if (parsed && parsed.version === 2 && parsed.kv && typeof parsed.kv === 'object') {
+                for (const [key, row] of Object.entries(parsed.kv)) {
+                    if (!row || typeof row.value !== 'string') continue;
+                    this.store.set(key, { value: row.value, metadata: row.metadata == null ? null : row.metadata, expiration: Number(row.expiration) || null });
+                }
+                return;
+            }
+            // Old hand-written server layout ({ users, scores }); keep a copy and start clean.
+            const backup = `${this.filePath}.legacy-${Date.now()}.json`;
+            fs.copyFileSync(this.filePath, backup);
+            console.warn(`[server] data file was in the old format; copied to ${path.basename(backup)} and starting with an empty store`);
+        } catch (e) {
+            console.warn('[server] could not read data file, starting with an empty store:', e.message);
+        }
+    }
+
+    scheduleSave() {
+        if (!this.filePath) return;
+        this.dirty = true;
+        if (this.saveTimer) return;
+        this.saveTimer = setTimeout(() => {
+            this.saveTimer = null;
+            this.flushSync();
+        }, 50);
+        if (typeof this.saveTimer.unref === 'function') this.saveTimer.unref();
+    }
+
+    flushSync() {
+        if (!this.filePath || !this.dirty) return;
+        this.dirty = false;
+        if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
+        this.sweepExpired();
+        const kv = {};
+        for (const [key, row] of this.store.entries()) kv[key] = row;
+        const dir = path.dirname(this.filePath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        const tmp = `${this.filePath}.tmp`;
+        fs.writeFileSync(tmp, JSON.stringify({ version: 2, savedAt: Date.now(), kv }, null, 1), 'utf8');
+        fs.renameSync(tmp, this.filePath);
+    }
+
+    isExpired(row, nowSec = Date.now() / 1000) {
+        return !!(row && row.expiration && row.expiration <= nowSec);
+    }
+
+    sweepExpired() {
+        const nowSec = Date.now() / 1000;
+        for (const [key, row] of this.store.entries()) {
+            if (this.isExpired(row, nowSec)) this.store.delete(key);
+        }
+    }
+
+    live(key) {
+        const row = this.store.get(key);
+        if (!row) return null;
+        if (this.isExpired(row)) {
+            this.store.delete(key);
+            this.scheduleSave();
+            return null;
+        }
+        return row;
+    }
+
+    async get(key, options = null) {
+        const row = this.live(String(key));
+        if (!row) return null;
+        const type = typeof options === 'string' ? options : (options && options.type) || 'text';
+        if (type === 'json') { try { return JSON.parse(row.value); } catch { return null; } }
+        if (type === 'arrayBuffer') return new TextEncoder().encode(row.value).buffer;
+        return row.value;
+    }
+
+    async getWithMetadata(key, options = null) {
+        const row = this.live(String(key));
+        const value = row ? await this.get(key, options) : null;
+        return { value, metadata: row ? row.metadata : null };
+    }
+
+    async put(key, value, options = null) {
+        const text = typeof value === 'string' ? value
+            : value instanceof ArrayBuffer ? new TextDecoder().decode(new Uint8Array(value))
+                : ArrayBuffer.isView(value) ? new TextDecoder().decode(value)
+                    : String(value);
+        let expiration = null;
+        if (options && Number(options.expirationTtl) > 0) expiration = Math.floor(Date.now() / 1000) + Math.floor(Number(options.expirationTtl));
+        else if (options && Number(options.expiration) > 0) expiration = Math.floor(Number(options.expiration));
+        const metadata = options && options.metadata !== undefined ? JSON.parse(JSON.stringify(options.metadata)) : null;
+        this.store.set(String(key), { value: text, metadata, expiration });
+        this.scheduleSave();
+    }
+
+    async delete(key) {
+        if (this.store.delete(String(key))) this.scheduleSave();
+    }
+
+    async list(options = {}) {
+        const prefix = String((options && options.prefix) || '');
+        const limit = Math.max(1, Math.min(1000, Number((options && options.limit) || 1000)));
+        const start = Number((options && options.cursor) || 0) || 0;
+        const nowSec = Date.now() / 1000;
+        const names = [...this.store.keys()].filter((k) => k.startsWith(prefix) && !this.isExpired(this.store.get(k), nowSec)).sort();
+        const page = names.slice(start, start + limit);
+        const keys = page.map((name) => {
+            const row = this.store.get(name);
+            const out = { name };
+            if (row.expiration) out.expiration = row.expiration;
+            if (row.metadata != null) out.metadata = row.metadata;
+            return out;
+        });
+        const listComplete = start + limit >= names.length;
+        return { keys, list_complete: listComplete, cursor: listComplete ? undefined : String(start + limit), cacheStatus: null };
+    }
+
+    clear() {
+        this.store.clear();
+        this.scheduleSave();
     }
 }
 
-function readData() {
-    ensureDataStore();
-    try {
-        const raw = fs.readFileSync(DATA_FILE, 'utf8');
-        const parsed = JSON.parse(raw);
-        return {
-            users: Array.isArray(parsed.users) ? parsed.users : [],
-            scores: Array.isArray(parsed.scores) ? parsed.scores : [],
-        };
-    } catch (e) {
-        return { users: [], scores: [] };
+// ---------------------------------------------------------------------------
+// Static files, standing in for Cloudflare's ASSETS binding.
+// ---------------------------------------------------------------------------
+function createAssets({ root = ROOT, cache = 'short' } = {}) {
+    const compressedCache = new Map();
+
+    function textResponse(status, text) {
+        return new Response(text, { status, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
     }
+
+    async function fetchAsset(request) {
+        const url = new URL(request.url);
+        const method = request.method.toUpperCase();
+        if (method !== 'GET' && method !== 'HEAD') return textResponse(405, 'Method not allowed');
+        let reqPath;
+        try {
+            reqPath = decodeURIComponent(url.pathname);
+        } catch {
+            return textResponse(400, 'Bad request');
+        }
+        if (reqPath.includes('\0')) return textResponse(400, 'Bad request');
+        if (reqPath === '/' || reqPath === '') reqPath = '/index.html';
+        const resolved = path.resolve(root, `.${reqPath}`);
+        if (resolved !== root && !resolved.startsWith(root + path.sep)) return textResponse(403, 'Forbidden');
+        const relative = path.relative(root, resolved);
+        if (isBlockedPath(relative)) return textResponse(404, 'Not found');
+
+        let stat;
+        try {
+            stat = fs.statSync(resolved);
+        } catch {
+            return textResponse(404, 'Not found');
+        }
+        if (stat.isDirectory()) {
+            const indexPath = path.join(resolved, 'index.html');
+            if (!fs.existsSync(indexPath)) return textResponse(404, 'Not found');
+            return fetchAsset(new Request(new URL(`${reqPath.replace(/\/?$/, '/')}index.html`, url).href, { method, headers: request.headers }));
+        }
+
+        const ext = path.extname(resolved).toLowerCase();
+        const base = path.basename(resolved);
+        const headers = new Headers();
+        headers.set('content-type', MIME[ext] || 'application/octet-stream');
+        headers.set('x-content-type-options', 'nosniff');
+        const etag = `W/"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`;
+        headers.set('etag', etag);
+        headers.set('last-modified', new Date(stat.mtimeMs).toUTCString());
+        if (base === 'index.html' || base === 'sw.js') headers.set('cache-control', 'no-cache');
+        else if (cache === 'long') headers.set('cache-control', 'public, max-age=31536000, immutable');
+        else headers.set('cache-control', 'no-cache');
+        headers.set('vary', 'Accept-Encoding');
+
+        if (request.headers.get('if-none-match') === etag) {
+            return new Response(null, { status: 304, headers });
+        }
+
+        let body = fs.readFileSync(resolved);
+        if (COMPRESSIBLE.has(ext) && body.length >= MIN_COMPRESS_BYTES) {
+            const accept = String(request.headers.get('accept-encoding') || '');
+            const encoding = /\bbr\b/.test(accept) ? 'br' : /\bgzip\b/.test(accept) ? 'gzip' : '';
+            if (encoding) {
+                const cacheKey = `${resolved}:${stat.size}:${Math.floor(stat.mtimeMs)}:${encoding}`;
+                let compressed = compressedCache.get(cacheKey);
+                if (!compressed) {
+                    compressed = encoding === 'br'
+                        ? zlib.brotliCompressSync(body, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 5 } })
+                        : zlib.gzipSync(body, { level: 6 });
+                    if (compressedCache.size > 200) compressedCache.clear();
+                    compressedCache.set(cacheKey, compressed);
+                }
+                body = compressed;
+                headers.set('content-encoding', encoding);
+            }
+        }
+        headers.set('content-length', String(body.length));
+        return new Response(method === 'HEAD' ? null : body, { status: 200, headers });
+    }
+
+    return { fetch: fetchAsset };
 }
 
-function writeData(data) {
-    ensureDataStore();
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf8');
-}
-
-function sendJson(res, code, payload) {
-    res.writeHead(code, {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Cache-Control': 'no-store',
-        'X-Content-Type-Options': 'nosniff',
-    });
-    res.end(JSON.stringify(payload));
-}
-
-function parseBody(req) {
+// ---------------------------------------------------------------------------
+// Node <-> web Request/Response plumbing
+// ---------------------------------------------------------------------------
+function readBody(req, maxBytes) {
     return new Promise((resolve, reject) => {
-        let body = '';
-        req.on('data', chunk => {
-            body += chunk;
-            if (body.length > 1e6) {
+        const chunks = [];
+        let total = 0;
+        req.on('data', (chunk) => {
+            total += chunk.length;
+            if (total > maxBytes) {
+                const err = new Error('Payload too large');
+                err.status = 413;
                 req.destroy();
-                reject(new Error('Payload too large'));
+                reject(err);
+                return;
             }
+            chunks.push(chunk);
         });
-        req.on('end', () => {
-            if (!body) return resolve({});
-            try {
-                resolve(JSON.parse(body));
-            } catch (e) {
-                reject(new Error('Invalid JSON'));
-            }
-        });
+        req.on('end', () => resolve(Buffer.concat(chunks)));
         req.on('error', reject);
     });
 }
 
-function hashPassword(password, saltHex = crypto.randomBytes(16).toString('hex')) {
-    const hash = crypto.scryptSync(password, saltHex, 64).toString('hex');
-    return { hash, salt: saltHex };
-}
-
-function constantTimeEqual(a, b) {
-    if (typeof a !== 'string' || typeof b !== 'string') return false;
-    if (a.length !== b.length) return false;
-    return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
-}
-
-function buildToken(payloadObj) {
-    const payload = Buffer.from(JSON.stringify(payloadObj)).toString('base64url');
-    const sig = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('base64url');
-    return `${payload}.${sig}`;
-}
-
-function verifyToken(token) {
-    if (!token || !token.includes('.')) return null;
-    const [payload, sig] = token.split('.');
-    const expected = crypto.createHmac('sha256', TOKEN_SECRET).update(payload).digest('base64url');
-    if (sig !== expected) return null;
-    try {
-        const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-        if (!parsed || typeof parsed !== 'object') return null;
-        if (!parsed.exp || Date.now() > parsed.exp) return null;
-        return parsed;
-    } catch (e) {
-        return null;
+async function toWebRequest(req, { trustProxy }) {
+    const host = req.headers.host || 'localhost';
+    const forwardedProto = trustProxy ? String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim() : '';
+    const proto = forwardedProto === 'https' ? 'https' : 'http';
+    const url = `${proto}://${host}${req.url || '/'}`;
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(req.headers)) {
+        if (value == null) continue;
+        if (Array.isArray(value)) value.forEach((v) => headers.append(key, v));
+        else headers.set(key, String(value));
     }
+    const forwardedFor = trustProxy ? String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() : '';
+    headers.set('cf-connecting-ip', forwardedFor || req.socket.remoteAddress || 'unknown');
+    const method = (req.method || 'GET').toUpperCase();
+    const init = { method, headers };
+    if (method !== 'GET' && method !== 'HEAD') {
+        init.body = await readBody(req, MAX_API_BODY_BYTES);
+    }
+    return new Request(url, init);
 }
 
-function getAuthUser(req, data) {
-    const auth = req.headers.authorization || '';
-    const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-    const payload = verifyToken(token);
-    if (!payload || !payload.uid) return null;
-    return data.users.find(u => u.id === payload.uid) || null;
-}
-
-function normalizeUsername(username) {
-    return String(username || '').trim().toLowerCase();
-}
-
-function publicUser(user) {
-    return { id: user.id, username: user.username };
-}
-
-function isBetterScore(candidate, baseline) {
-    if (!baseline) return true;
-    if ((candidate.wpm || 0) > (baseline.wpm || 0)) return true;
-    if ((candidate.wpm || 0) < (baseline.wpm || 0)) return false;
-    if ((candidate.accuracy || 0) > (baseline.accuracy || 0)) return true;
-    if ((candidate.accuracy || 0) < (baseline.accuracy || 0)) return false;
-    return (candidate.date || 0) > (baseline.date || 0);
-}
-
-function serveStatic(req, res) {
-    let reqPath;
-    try {
-        reqPath = decodeURIComponent(req.url === '/' ? '/index.html' : req.url.split('?')[0]);
-    } catch (e) {
-        res.writeHead(400, { 'Content-Type': 'text/plain' });
-        res.end('Bad request');
+async function sendWebResponse(res, response, method) {
+    res.statusCode = response.status;
+    for (const [key, value] of response.headers) {
+        if (key.toLowerCase() === 'set-cookie') continue;
+        res.setHeader(key, value);
+    }
+    const cookies = typeof response.headers.getSetCookie === 'function' ? response.headers.getSetCookie() : [];
+    if (cookies.length) res.setHeader('set-cookie', cookies);
+    if (method === 'HEAD' || response.status === 204 || response.status === 304 || !response.body) {
+        res.end();
         return;
     }
-    if (reqPath.includes('\0')) {
-        res.writeHead(400, { 'Content-Type': 'text/plain' });
-        res.end('Bad request');
-        return;
+    const buf = Buffer.from(await response.arrayBuffer());
+    if (!res.hasHeader('content-length')) res.setHeader('content-length', String(buf.length));
+    res.end(buf);
+}
+
+// ---------------------------------------------------------------------------
+// App factory (used by `node server.js` and by tests/backend.test.js)
+// ---------------------------------------------------------------------------
+function createApp(options = {}) {
+    const port = options.port != null ? Number(options.port) : Number(process.env.PORT || DEFAULT_PORT);
+    const dataFile = options.dataFile === null ? null : (options.dataFile || process.env.DATA_FILE || path.join(ROOT, 'data', 'app-data.json'));
+    const trustProxy = options.trustProxy != null ? !!options.trustProxy : process.env.TRUST_PROXY === '1';
+    const assetCache = options.assetCache || process.env.ASSET_CACHE || (process.env.NODE_ENV === 'production' ? 'long' : 'short');
+    const kv = options.kv || new MemoryKV(dataFile);
+
+    let tokenSecret = String(options.tokenSecret || process.env.TYPING_TEST_TOKEN_SECRET || process.env.TOKEN_SECRET || '');
+    let randomSecret = false;
+    if (!tokenSecret) {
+        tokenSecret = crypto.randomBytes(32).toString('hex');
+        randomSecret = true;
     }
-    const resolved = path.resolve(__dirname, `.${reqPath}`);
-    if (!resolved.startsWith(__dirname + path.sep) && resolved !== __dirname) {
-        res.writeHead(403, { 'Content-Type': 'text/plain' });
-        res.end('Forbidden');
-        return;
-    }
-    // Block access to data directory and dotfiles
-    const relative = path.relative(__dirname, resolved);
-    if (relative.startsWith('data') || relative.startsWith('.') || relative.includes(path.sep + '.')) {
-        res.writeHead(403, { 'Content-Type': 'text/plain' });
-        res.end('Forbidden');
-        return;
-    }
-    const ext = path.extname(resolved);
-    fs.readFile(resolved, (err, file) => {
-        if (err) {
-            res.writeHead(404, { 'Content-Type': 'text/plain' });
-            res.end('Not found');
-            return;
+    const env = {
+        TYPING_APP: kv,
+        TOKEN_SECRET: tokenSecret,
+        ADMIN_USERNAME: options.adminUsername != null ? options.adminUsername : (process.env.ADMIN_USERNAME || ''),
+        ADMIN_USER_ID: options.adminUserId != null ? options.adminUserId : (process.env.ADMIN_USER_ID || ''),
+        ASSETS: createAssets({ root: ROOT, cache: assetCache }),
+    };
+    const ctx = {
+        waitUntil(promise) { Promise.resolve(promise).catch(() => {}); },
+        passThroughOnException() {},
+    };
+
+    // The router and security headers are the same module worker.js uses.
+    let worker = null;
+    async function loadWorker() {
+        if (!worker) {
+            const mod = await import(pathToFileURL(path.join(ROOT, 'functions', 'api', '_router.js')).href);
+            worker = {
+                async fetch(request, workerEnv, workerCtx) {
+                    const apiResponse = await mod.handleApiRequest(request, workerEnv, workerCtx);
+                    if (apiResponse) return apiResponse;
+                    const assetRes = await workerEnv.ASSETS.fetch(request);
+                    return mod.applySecurityHeaders(assetRes, request);
+                },
+            };
         }
-        const headers = { 'Content-Type': MIME[ext] || 'application/octet-stream' };
-        if (ext === '.html') {
-            headers['Cache-Control'] = 'no-cache';
+        return worker;
+    }
+
+    const server = http.createServer(async (req, res) => {
+        const method = (req.method || 'GET').toUpperCase();
+        try {
+            const w = await loadWorker();
+            const request = await toWebRequest(req, { trustProxy });
+            const response = await w.fetch(request, env, ctx);
+            await sendWebResponse(res, response, method);
+        } catch (e) {
+            const status = Number(e && e.status) || 500;
+            if (status !== 413) console.error('[server] request failed:', e && e.stack ? e.stack : e);
+            if (!res.headersSent) {
+                res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+            }
+            res.end(JSON.stringify({ error: status === 413 ? 'Request body too large' : 'Server error' }));
         }
-        res.writeHead(200, headers);
-        res.end(file);
+    });
+
+    async function start() {
+        await loadWorker();
+        await new Promise((resolve, reject) => {
+            server.once('error', reject);
+            server.listen(port, () => {
+                server.off('error', reject);
+                resolve();
+            });
+        });
+        const actualPort = server.address().port;
+        if (!options.quiet) {
+            console.log(`Listening on http://localhost:${actualPort}`);
+            console.log(`Data file: ${dataFile || '(memory only)'}`);
+            if (randomSecret) {
+                console.warn('WARNING: TYPING_TEST_TOKEN_SECRET is not set. Using a random secret for this run only, so every login will stop working when the server restarts. Set it in your environment to keep sessions.');
+            }
+            if (!env.ADMIN_USERNAME && !env.ADMIN_USER_ID) {
+                console.log('Note: ADMIN_USERNAME is not set, so no account has the admin panel.');
+            }
+        }
+        return actualPort;
+    }
+
+    async function stop() {
+        kv.flushSync();
+        await new Promise((resolve) => server.close(() => resolve()));
+    }
+
+    const flushOnExit = () => { try { kv.flushSync(); } catch {} };
+    process.once('exit', flushOnExit);
+    for (const signal of ['SIGINT', 'SIGTERM']) {
+        process.once(signal, () => { flushOnExit(); process.exit(0); });
+    }
+
+    return { server, start, stop, kv, env, port };
+}
+
+module.exports = { createApp, MemoryKV, createAssets, isBlockedPath };
+
+if (require.main === module) {
+    createApp().start().catch((e) => {
+        console.error('[server] failed to start:', e && e.message ? e.message : e);
+        process.exit(1);
     });
 }
-
-async function handleApi(req, res) {
-    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-    const pathname = url.pathname;
-    const method = req.method || 'GET';
-    const data = readData();
-
-    if (method === 'POST' && pathname === '/api/signup') {
-        const body = await parseBody(req);
-        const usernameRaw = String(body.username || '').trim();
-        const username = normalizeUsername(usernameRaw);
-        const password = String(body.password || '');
-        if (!username || username.length < 3 || username.length > 24 || !/^[a-z0-9_]+$/.test(username)) {
-            return sendJson(res, 400, { error: 'Username must be 3-24 chars: a-z, 0-9, _' });
-        }
-        if (password.length < 6) return sendJson(res, 400, { error: 'Password must be at least 6 characters' });
-        if (data.users.some(u => u.usernameNorm === username)) return sendJson(res, 409, { error: 'Username already exists' });
-
-        const id = crypto.randomUUID();
-        const { hash, salt } = hashPassword(password);
-        const user = {
-            id,
-            username: usernameRaw,
-            usernameNorm: username,
-            passwordHash: hash,
-            passwordSalt: salt,
-            createdAt: Date.now(),
-        };
-        data.users.push(user);
-        writeData(data);
-
-        const token = buildToken({ uid: id, exp: Date.now() + SESSION_TTL_MS });
-        return sendJson(res, 201, { user: publicUser(user), token });
-    }
-
-    if (method === 'POST' && pathname === '/api/login') {
-        const body = await parseBody(req);
-        const username = normalizeUsername(body.username);
-        const password = String(body.password || '');
-        const user = data.users.find(u => u.usernameNorm === username);
-        if (!user) return sendJson(res, 401, { error: 'Invalid username or password' });
-        const { hash } = hashPassword(password, user.passwordSalt);
-        if (!constantTimeEqual(hash, user.passwordHash)) return sendJson(res, 401, { error: 'Invalid username or password' });
-        const token = buildToken({ uid: user.id, exp: Date.now() + SESSION_TTL_MS });
-        return sendJson(res, 200, { user: publicUser(user), token });
-    }
-
-    if (method === 'GET' && pathname === '/api/me') {
-        const user = getAuthUser(req, data);
-        if (!user) return sendJson(res, 401, { error: 'Unauthorized' });
-        return sendJson(res, 200, { user: publicUser(user) });
-    }
-
-    if (method === 'POST' && pathname === '/api/scores') {
-        const user = getAuthUser(req, data);
-        if (!user) return sendJson(res, 401, { error: 'Unauthorized' });
-        const body = await parseBody(req);
-        const score = {
-            id: crypto.randomUUID(),
-            userId: user.id,
-            username: user.username,
-            wpm: Number(body.wpm) || 0,
-            accuracy: Number(body.accuracy) || 0,
-            rawWpm: Number(body.rawWpm) || 0,
-            consistency: Number(body.consistency) || 0,
-            time: Number(body.time) || 0,
-            mode: String(body.mode || 'quotes'),
-            date: Number(body.date) || Date.now(),
-            createdAt: Date.now(),
-        };
-        if (score.wpm < 0 || score.wpm > 400 ||
-            score.accuracy < 0 || score.accuracy > 100 ||
-            score.rawWpm < 0 || score.rawWpm > 600 ||
-            score.time < 0 || score.time > 3600) {
-            return sendJson(res, 400, { error: 'Invalid score payload' });
-        }
-
-        const sameModeIdx = data.scores.findIndex(s => s.userId === user.id && s.mode === score.mode);
-        const existing = sameModeIdx >= 0 ? data.scores[sameModeIdx] : null;
-        if (!isBetterScore(score, existing)) {
-            return sendJson(res, 409, { error: 'Only your best run for this mode can be submitted.' });
-        }
-        if (sameModeIdx >= 0) data.scores[sameModeIdx] = score;
-        else data.scores.push(score);
-        writeData(data);
-        return sendJson(res, 201, { ok: true, score });
-    }
-
-    if (method === 'GET' && pathname === '/api/scores/me') {
-        const user = getAuthUser(req, data);
-        if (!user) return sendJson(res, 401, { error: 'Unauthorized' });
-        const limit = Math.max(1, Math.min(200, Number(url.searchParams.get('limit') || 50)));
-        const mode = (url.searchParams.get('mode') || '').trim();
-        const list = data.scores
-            .filter(s => s.userId === user.id && (!mode || s.mode === mode))
-            .sort((a, b) => b.date - a.date)
-            .slice(0, limit);
-        return sendJson(res, 200, { scores: list });
-    }
-
-    if (method === 'GET' && pathname === '/api/leaderboard') {
-        const mode = (url.searchParams.get('mode') || '').trim();
-        const limit = Math.max(1, Math.min(100, Number(url.searchParams.get('limit') || 20)));
-        const bestByUserMode = new Map();
-        for (const score of data.scores) {
-            if (mode && score.mode !== mode) continue;
-            const key = `${score.userId}::${score.mode}`;
-            const prev = bestByUserMode.get(key);
-            if (isBetterScore(score, prev)) bestByUserMode.set(key, score);
-        }
-        const leaderboard = [...bestByUserMode.values()]
-            .sort((a, b) => b.wpm - a.wpm || b.accuracy - a.accuracy || b.date - a.date)
-            .slice(0, limit);
-        return sendJson(res, 200, { leaderboard });
-    }
-
-    return sendJson(res, 404, { error: 'Not found' });
-}
-
-http.createServer(async (req, res) => {
-    try {
-        if ((req.url || '').startsWith('/api/')) {
-            await handleApi(req, res);
-            return;
-        }
-        serveStatic(req, res);
-    } catch (e) {
-        sendJson(res, 500, { error: 'Server error' });
-    }
-}).listen(PORT, () => {
-    console.log(`Listening on http://localhost:${PORT}`);
-});

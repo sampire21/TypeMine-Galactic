@@ -16,12 +16,9 @@ async function dismissSplash(page) {
 
 /** Dismiss splash by clicking through the full UI flow (used for splash-specific tests) */
 async function dismissSplashViaUI(page) {
-  await page.locator('.entry-splash-stage').click();
+  // Single-phase splash: the Start button (guest) dismisses it directly.
   await page.locator('#entry-guest-btn').waitFor({ state: 'visible', timeout: 5000 });
   await page.locator('#entry-guest-btn').click();
-  await page.waitForTimeout(400);
-  await page.locator('#entry-guide-cta').waitFor({ state: 'visible', timeout: 5000 });
-  await page.locator('#entry-guide-cta').click();
   await expect(page.locator('#entry-splash')).toHaveClass(/hidden/, { timeout: 8000 });
 }
 
@@ -64,9 +61,8 @@ test.describe('Page Load', () => {
     expect(promptText).toMatch(/tap|press any key/i);
   });
 
-  test('clicking splash reveals login/signup/guest options', async ({ page }) => {
+  test('splash shows login/signup/guest options', async ({ page }) => {
     await page.goto('/');
-    await page.locator('.entry-splash-stage').click();
     await expect(page.locator('#entry-login-btn')).toBeVisible({ timeout: 5000 });
     await expect(page.locator('#entry-guest-btn')).toBeVisible();
   });
@@ -117,9 +113,11 @@ test.describe('Main UI', () => {
 
   test('top bar shows key controls', async ({ page }) => {
     await expect(page.locator('#top-bar')).toBeVisible();
+    await expect(page.locator('#profile-toggle')).toBeVisible();
+    // Key sound and music controls now live in the settings panel (gear button).
+    await page.locator('#settings-toggle').click();
     await expect(page.locator('#keysound-toggle')).toBeVisible();
     await expect(page.locator('#music-toggle')).toBeVisible();
-    await expect(page.locator('#profile-toggle')).toBeVisible();
   });
 });
 
@@ -204,8 +202,8 @@ test.describe('Mode Switching', () => {
     expect(count).toBeGreaterThan(5);
   });
 
-  test('switching to Words 30s mode shows compact display', async ({ page }) => {
-    await page.locator('.mode-tab', { hasText: 'Words 30s' }).click();
+  test('switching to Timed mode shows compact display', async ({ page }) => {
+    await page.locator('.mode-tab', { hasText: 'Timed' }).click();
     await page.waitForTimeout(500);
     const quoteDisplay = page.locator('#quote-display');
     await expect(quoteDisplay).toHaveClass(/words30-compact/, { timeout: 3000 });
@@ -240,6 +238,7 @@ test.describe('Menus and Modals', () => {
   test('key sound menu opens and closes', async ({ page }) => {
     const menu = page.locator('#keysound-menu');
     await expect(menu).not.toBeVisible();
+    await page.locator('#settings-toggle').click();
     await page.locator('#keysound-toggle').click();
     await expect(menu).toBeVisible({ timeout: 2000 });
     await page.locator('body').click({ position: { x: 10, y: 400 } });
@@ -249,6 +248,7 @@ test.describe('Menus and Modals', () => {
   test('music menu opens and closes', async ({ page }) => {
     const menu = page.locator('#music-menu');
     await expect(menu).not.toBeVisible();
+    await page.locator('#settings-toggle').click();
     await page.locator('#music-toggle').click();
     await expect(menu).toBeVisible({ timeout: 2000 });
     await page.locator('body').click({ position: { x: 10, y: 400 } });
@@ -347,10 +347,10 @@ test.describe('Mobile Touch Input', () => {
 
   test('splash screen responds to tap', async ({ page }) => {
     await page.goto('/');
-    const stage = page.locator('.entry-splash-stage');
-    if (await stage.isVisible()) {
-      await stage.tap().catch(() => stage.click());
-      await expect(page.locator('#entry-guest-btn')).toBeVisible({ timeout: 5000 });
+    const start = page.locator('#entry-guest-btn');
+    if (await start.isVisible()) {
+      await start.tap().catch(() => start.click());
+      await expect(page.locator('#entry-splash')).toHaveClass(/hidden/, { timeout: 5000 });
     }
   });
 });

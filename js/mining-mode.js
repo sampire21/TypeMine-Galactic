@@ -3,10 +3,21 @@
 
     const MINING_STATE_STORAGE_KEY = 'sampire-mining-state-v1';
     const MINING_COMMUNITY_STORAGE_KEY = 'sampire-mining-community-buffer-v1';
-    const DEFAULT_LAYER_HP = [84, 132, 196, 284, 396];
+    // Balance (see tests/mining-mode.test.js for the assertions behind these numbers):
+    // the first few layers are short so a new player sees a shatter inside a minute,
+    // then every layer has 10% more hits than the last. Crystals per layer scale with
+    // the layer's hits (about one crystal per 60 hits), so crystals per minute stay
+    // roughly flat no matter how deep you are.
+    const DEFAULT_LAYER_HP = [240, 300, 370, 450, 540];
+    const LAYER_HP_GROWTH = 1.10;
+    const CRYSTALS_PER_HP = 1 / 60;
     const DEFAULT_BASE_DAMAGE = 6;
+    const COMBO_STEP = 0.03;
+    const COMBO_CAP = 1.45;
     const OVERLOAD_DURATION_MS = 10000;
     const OVERLOAD_CHARGE_PER_WORD = 2;
+    const OVERLOAD_PASSIVE_MULTIPLIER = 3;
+    const DRONE_TYPE_UNLOCK_LEVEL = 10;
     const STORY_LIBRARY = [
         {
             id: 'alice-in-wonderland',
@@ -33,8 +44,8 @@
     const DRONE_SPECIALIZATIONS = [
         {
             id: 'swarm',
-            name: 'Swarm Firmware',
-            description: 'Doubles drone attack speed while each individual hit lands lighter.',
+            name: 'Swarm drones',
+            description: 'Drones fire twice as often, but each shot hits for half. Same total damage, more action.',
             unlockLevel: 10,
             attackSpeedMultiplier: 2,
             passiveDamageMultiplier: 1,
@@ -44,8 +55,8 @@
         },
         {
             id: 'precision',
-            name: 'Precision Firmware',
-            description: 'Drones have a 25% chance to channel your current critical damage multiplier.',
+            name: 'Precision drones',
+            description: 'One drone shot in four lands as a bonus hit (double damage).',
             unlockLevel: 15,
             attackSpeedMultiplier: 1,
             passiveDamageMultiplier: 1,
@@ -55,8 +66,8 @@
         },
         {
             id: 'salvage',
-            name: 'Salvage Firmware',
-            description: 'Drones deal 20% less damage, but occasionally recover double crystal payloads.',
+            name: 'Salvage drones',
+            description: 'Drones hit 20% lighter, but one layer in twenty pays out double crystals.',
             unlockLevel: 20,
             attackSpeedMultiplier: 1,
             passiveDamageMultiplier: 0.8,
@@ -69,65 +80,65 @@
     const MINING_UPGRADES = [
         {
             id: 'automated_drones',
-            name: 'Automated Limpet Drones',
-            description: 'Deploys autonomous drones that add passive asteroid damage every second.',
+            name: 'Helper drones',
+            description: 'Drones that keep hitting the asteroid on their own, even while you read. Each level adds one hit every second or so.',
             category: 'automation',
-            baseCost: 25,
-            costScale: 1.42,
-            maxLevel: 50,
+            baseCost: 30,
+            costScale: 1.25,
+            maxLevel: 20,
             effect(level) {
-                return { dps: level * 3.5 };
+                return { dps: level * 1.2 };
             },
         },
         {
             id: 'laser_drills',
-            name: 'Laser Drills',
-            description: 'Increases the base damage applied by active typing bursts.',
+            name: 'Stronger laser',
+            description: 'Every letter you type hits harder.',
             category: 'active',
             baseCost: 40,
-            costScale: 1.55,
-            maxLevel: 25,
+            costScale: 1.3,
+            maxLevel: 20,
             effect(level) {
-                return { baseDamageBonus: level * 2.25 };
+                return { baseDamageBonus: level * 1.5 };
             },
         },
         {
             id: 'buffer_optimizations',
-            name: 'Buffer Optimizations',
-            description: 'Converts high WPM runs into stronger burst multipliers and steadier crystal yields.',
+            name: 'Faster words',
+            description: 'Your typing speed counts for more damage, and each layer pays a few more crystals.',
             category: 'bridge',
-            baseCost: 65,
-            costScale: 1.6,
-            maxLevel: 20,
+            baseCost: 60,
+            costScale: 1.26,
+            maxLevel: 15,
             effect(level) {
                 return {
-                    wpmMultiplierBonus: level * 0.035,
-                    crystalYieldBonus: level * 0.04,
+                    wpmMultiplierBonus: level * 0.03,
+                    crystalYieldBonus: level * 0.03,
                 };
             },
         },
         {
             id: 'neural_focus',
-            name: 'Neural Focus',
-            description: 'Sharpens target lock routines to raise critical hit frequency.',
+            name: 'Better accuracy bonus',
+            description: 'Finishing a word with no mistakes lands a double-damage bonus hit more often.',
             category: 'critical',
-            baseCost: 90,
-            costScale: 1.68,
-            maxLevel: 25,
+            baseCost: 80,
+            costScale: 1.26,
+            maxLevel: 15,
             effect(level) {
-                return { critChanceBonus: level * 0.01 };
+                return { critChanceBonus: level * 0.015 };
             },
         },
         {
             id: 'overclocked_actuators',
-            name: 'Overclocked Actuators',
-            description: 'Pushes strike servos past spec, increasing critical hit damage.',
+            name: 'Faster drones',
+            description: 'Your helper drones hit 10% harder per level.',
             category: 'critical',
-            baseCost: 120,
-            costScale: 1.74,
-            maxLevel: 20,
+            baseCost: 100,
+            costScale: 1.26,
+            maxLevel: 15,
             effect(level) {
-                return { critMultiplierBonus: level * 0.2 };
+                return { droneDamageBonus: level * 0.1 };
             },
         },
     ];
@@ -470,7 +481,26 @@
                 pendingDamage: 0,
                 lifetimeDamage: 0,
             },
+            // Last crystal count copied to the shared wallet badge (null until the first copy).
+            walletMirror: null,
+            // Per-book story milestones: { chapters, layers, checkpoints }.
+            milestones: {},
         };
+    }
+
+    function sanitizeMilestones(raw) {
+        const out = {};
+        if (!raw || typeof raw !== 'object') return out;
+        for (const book of STORY_LIBRARY) {
+            const entry = raw[book.id];
+            if (!entry || typeof entry !== 'object') continue;
+            out[book.id] = {
+                chapters: Math.max(0, Math.floor(Number(entry.chapters) || 0)),
+                layers: Math.max(0, Math.floor(Number(entry.layers) || 0)),
+                checkpoints: Math.max(0, Math.floor(Number(entry.checkpoints) || 0)),
+            };
+        }
+        return out;
     }
 
     function sanitizeState(rawState) {
@@ -526,6 +556,10 @@
                 pendingDamage: Math.max(0, Math.floor(Number(state.communityContribution && state.communityContribution.pendingDamage) || 0)),
                 lifetimeDamage: Math.max(0, Math.floor(Number(state.communityContribution && state.communityContribution.lifetimeDamage) || 0)),
             },
+            walletMirror: state.walletMirror == null || !Number.isFinite(Number(state.walletMirror))
+                ? null
+                : Math.max(0, Math.floor(Number(state.walletMirror))),
+            milestones: sanitizeMilestones(state.milestones),
         };
     }
 
@@ -547,9 +581,9 @@
         const spec = getDroneSpecializationDefinition(specId);
         return {
             id: spec ? spec.id : '',
-            name: spec ? spec.name : 'Base Firmware',
-            description: spec ? spec.description : 'Balanced drone firmware with no specialization applied.',
-            unlockLevel: spec ? spec.unlockLevel : 10,
+            name: spec ? spec.name : 'Standard drones',
+            description: spec ? spec.description : 'Plain drones with no special behaviour.',
+            unlockLevel: spec ? spec.unlockLevel : DRONE_TYPE_UNLOCK_LEVEL,
             attackSpeedMultiplier: spec ? spec.attackSpeedMultiplier : 1,
             passiveDamageMultiplier: spec ? spec.passiveDamageMultiplier : 1,
             perShotDamageMultiplier: spec ? spec.perShotDamageMultiplier : 1,
@@ -576,7 +610,7 @@
         return {
             elapsedMs,
             baseDamage: perSecond * ((elapsedMs - overloadMs) / 1000),
-            overloadDamage: perSecond * 3 * (overloadMs / 1000),
+            overloadDamage: perSecond * OVERLOAD_PASSIVE_MULTIPLIER * (overloadMs / 1000),
             droneEffects,
             perSecond,
         };
@@ -597,6 +631,7 @@
             crystalYieldBonus: 0,
             critChanceBonus: 0,
             critMultiplierBonus: 0,
+            droneDamageBonus: 0,
         };
 
         for (const def of MINING_UPGRADES) {
@@ -608,6 +643,7 @@
             totals.crystalYieldBonus += Number(effect.crystalYieldBonus) || 0;
             totals.critChanceBonus += Number(effect.critChanceBonus) || 0;
             totals.critMultiplierBonus += Number(effect.critMultiplierBonus) || 0;
+            totals.droneDamageBonus += Number(effect.droneDamageBonus) || 0;
         }
 
         totals.dps = roundTo(Math.max(0, totals.dps), 2);
@@ -616,6 +652,9 @@
         totals.crystalYieldBonus = roundTo(Math.max(0, totals.crystalYieldBonus), 3);
         totals.critChanceBonus = roundTo(Math.max(0, totals.critChanceBonus), 3);
         totals.critMultiplierBonus = roundTo(Math.max(0, totals.critMultiplierBonus), 3);
+        totals.droneDamageBonus = roundTo(Math.max(0, totals.droneDamageBonus), 3);
+        // Drone damage per second after the "Faster drones" bonus.
+        totals.dps = roundTo(totals.dps * (1 + totals.droneDamageBonus), 2);
         return totals;
     }
 
@@ -624,23 +663,41 @@
         const preset = DEFAULT_LAYER_HP[normalizedIndex];
         if (preset) return preset;
         const overflowIndex = normalizedIndex - (DEFAULT_LAYER_HP.length - 1);
-        return Math.floor(DEFAULT_LAYER_HP[DEFAULT_LAYER_HP.length - 1] * (1.22 ** overflowIndex));
+        return Math.floor(DEFAULT_LAYER_HP[DEFAULT_LAYER_HP.length - 1] * (LAYER_HP_GROWTH ** overflowIndex));
     }
 
+    // Crystals paid out when a layer shatters: about one per 60 hits, plus the
+    // "Faster words" yield bonus. Always at least one.
+    function getLayerCrystalReward(layerIndex, upgrades) {
+        const effects = getUpgradeEffects(upgrades || {});
+        const base = getLayerMaxHp(layerIndex) * CRYSTALS_PER_HP;
+        return Math.max(1, Math.round(base * (1 + effects.crystalYieldBonus)));
+    }
+
+    // Combo multiplier shown in the HUD and used in damage: +3% per letter, capped at 1.45x.
+    function getComboMultiplier(streak) {
+        return clamp(1 + (Math.max(0, Number(streak) || 0) * COMBO_STEP), 1, COMBO_CAP);
+    }
+
+    // Cheap check for hot paths: works on an already-sanitized state object without re-sanitizing.
     function isOverloadActive(state, nowMs) {
-        const normalized = sanitizeState(state);
+        const endsAt = state && typeof state === 'object' ? Number(state.overloadEndsAt) || 0 : 0;
         const now = Math.max(0, Number(nowMs) || Date.now());
-        return normalized.overloadEndsAt > now;
+        return endsAt > now;
     }
 
-    function addOverloadCharge(state, amount) {
+    function persistOrReturn(normalized, options) {
+        return options && options.skipSave ? normalized : saveMiningState(normalized);
+    }
+
+    function addOverloadCharge(state, amount, options) {
         const normalized = recalculateDerivedState(state);
-        if (isOverloadActive(normalized)) return { state: saveMiningState(normalized), chargedAmount: 0 };
+        if (isOverloadActive(normalized)) return { state: persistOrReturn(normalized, options), chargedAmount: 0 };
         const delta = Math.max(0, Number(amount) || 0);
         const prevMeter = normalized.overloadMeter;
         normalized.overloadMeter = clamp(prevMeter + delta, 0, 100);
         return {
-            state: saveMiningState(normalized),
+            state: persistOrReturn(normalized, options),
             chargedAmount: roundTo(normalized.overloadMeter - prevMeter, 2),
         };
     }
@@ -649,7 +706,7 @@
         const normalized = recalculateDerivedState(state);
         const now = Math.max(0, Number(nowMs) || Date.now());
         if (normalized.overloadMeter < 100) {
-            return { ok: false, error: 'Overload not charged.', state: saveMiningState(normalized) };
+            return { ok: false, error: 'Power boost not charged.', state: saveMiningState(normalized) };
         }
         // Credit passive damage accrued before overload starts.
         const credited = recalculateDerivedState(applyDamageToState(normalized, 0, { now, source: 'idle' }).state);
@@ -667,15 +724,15 @@
     function setDroneSpecialization(state, specId) {
         const normalized = recalculateDerivedState(state);
         const dronesLevel = Math.max(0, Math.floor(Number(normalized.upgrades && normalized.upgrades.automated_drones) || 0));
-        if (dronesLevel < 10) {
-            return { ok: false, error: 'Automated Limpet Drones must reach level 10 first.', state: saveMiningState(normalized) };
+        if (dronesLevel < DRONE_TYPE_UNLOCK_LEVEL) {
+            return { ok: false, error: `Helper drones must reach level ${DRONE_TYPE_UNLOCK_LEVEL} first.`, state: saveMiningState(normalized) };
         }
         const specDef = specId ? getDroneSpecializationDefinition(specId) : null;
         if (specId && !specDef) {
             return { ok: false, error: 'Unknown drone specialization.', state: saveMiningState(normalized) };
         }
         if (specDef && dronesLevel < specDef.unlockLevel) {
-            return { ok: false, error: `${specDef.name} requires Automated Limpet Drones level ${specDef.unlockLevel}.`, state: saveMiningState(normalized) };
+            return { ok: false, error: `${specDef.name} needs Helper drones level ${specDef.unlockLevel}.`, state: saveMiningState(normalized) };
         }
         normalized.droneSpecialization = specId || '';
         return { ok: true, state: saveMiningState(normalized), specialization: normalized.droneSpecialization };
@@ -703,7 +760,7 @@
         };
     }
 
-    function setCurrentStoryProgress(state, nextProgress) {
+    function setCurrentStoryProgress(state, nextProgress, options) {
         const normalized = sanitizeState(state);
         const progress = Math.max(0, Math.floor(Number(nextProgress) || 0));
         const bookId = normalized.currentStoryBookId || createDefaultMiningState().currentStoryBookId;
@@ -711,7 +768,7 @@
         normalized.storyProgressByBook[bookId] = progress;
         return {
             ok: true,
-            state: saveMiningState(normalized),
+            state: persistOrReturn(normalized, options),
             progress,
             bookId,
         };
@@ -722,7 +779,7 @@
         const overloadActive = isOverloadActive(normalized, nowMs);
         const droneEffects = getDroneSpecializationEffects(normalized.droneSpecialization);
         const passiveDamageMultiplier = roundTo(
-            getDroneNetMultiplier(droneEffects) * (overloadActive ? 3 : 1),
+            getDroneNetMultiplier(droneEffects) * (overloadActive ? OVERLOAD_PASSIVE_MULTIPLIER : 1),
             3,
         );
         return {
@@ -758,7 +815,7 @@
         const effectiveAccuracy = Number.isFinite(accuracy) ? accuracy : 0.5;
         const accuracyMultiplier = clamp(0.35 + (effectiveAccuracy * 0.75), 0.35, 1.1);
         const wpmMultiplier = clamp((wpm / 45) + 0.55 + bufferBonus, 0.55, 4.6);
-        const comboMultiplier = clamp(1 + (combo * 0.03), 1, 1.45);
+        const comboMultiplier = getComboMultiplier(combo);
         const burstMultiplier = charactersTyped >= 25
             ? clamp(1 + ((charactersTyped - 25) / 180), 1, 1.35)
             : 1;
@@ -840,6 +897,7 @@
             return { state: normalized, result: { damageApplied: 0, crystalsEarned, shatteredLayers } };
         }
 
+        const startLayer = normalized.currentLayer;
         while (damage > 0) {
             const remainingHp = Math.max(0, normalized.asteroidHP);
             if (damage < remainingHp) {
@@ -852,8 +910,7 @@
             damage -= remainingHp;
             normalized.totalDamageDealt = roundTo(normalized.totalDamageDealt + remainingHp, 2);
             shatteredLayers += 1;
-            const effects = getUpgradeEffects(normalized.upgrades);
-            let layerCrystalReward = Math.max(1, Math.round((normalized.currentLayer + 1) * (1 + effects.crystalYieldBonus)));
+            let layerCrystalReward = getLayerCrystalReward(normalized.currentLayer, normalized.upgrades);
             layerCrystalReward = Math.max(1, Math.round(layerCrystalReward * crystalMultiplier));
             if (doubleCrystalChance > 0 && Math.random() < doubleCrystalChance) {
                 layerCrystalReward *= 2;
@@ -874,11 +931,12 @@
         }
 
         return {
-            state: saveMiningState(normalized),
+            state: meta && meta.skipSave ? normalized : saveMiningState(normalized),
             result: {
                 damageApplied: Math.floor(Number(damageAmount) || 0),
                 crystalsEarned,
                 shatteredLayers,
+                startLayer,
             },
         };
     }
@@ -890,7 +948,7 @@
         const elapsedMs = passive.elapsedMs;
         const overloadActive = isOverloadActive(normalized, now);
         const droneEffects = passive.droneEffects;
-        const effectiveDps = roundTo(passive.perSecond * (overloadActive ? 3 : 1), 2);
+        const effectiveDps = roundTo(passive.perSecond * (overloadActive ? OVERLOAD_PASSIVE_MULTIPLIER : 1), 2);
         if (!elapsedMs || !effectiveDps) {
             normalized.lastTickAt = now;
             return {
@@ -902,8 +960,10 @@
             };
         }
 
+        // Power boost triples drone damage (computePassiveDamage already applied it); it is not
+        // multiplied again here. Precision drones roll for a bonus hit on the plain portion only.
         const overloadedPortion = passive.overloadDamage > 0;
-        let idleDamage = roundTo(passive.baseDamage + (overloadedPortion ? passive.overloadDamage * normalized.critMultiplier : 0), 2);
+        let idleDamage = roundTo(passive.baseDamage + passive.overloadDamage, 2);
         let passiveCritApplied = false;
         if (idleDamage > 0 && overloadedPortion) {
             passiveCritApplied = true;
@@ -918,12 +978,13 @@
                 source: 'idle',
                 now,
                 doubleCrystalChance: droneEffects.doubleCrystalChance,
+                skipSave: true,
             },
         );
         applied.state.lastTickAt = now;
-        saveMiningState(applied.state);
+        const savedState = saveMiningState(applied.state);
         return {
-            state: applied.state,
+            state: savedState,
             idleDamage,
             effectiveDps,
             overloadActive,
@@ -939,12 +1000,12 @@
 
         const currentLevel = Math.max(0, Math.floor(Number(normalized.upgrades[upgradeId]) || 0));
         if (currentLevel >= def.maxLevel) {
-            return { ok: false, error: 'Upgrade already maxed.', state: normalized };
+            return { ok: false, error: 'This upgrade is already at its top level.', state: normalized };
         }
 
         const cost = getUpgradeCost(upgradeId, currentLevel);
         if (normalized.totalAetherCrystals < cost) {
-            return { ok: false, error: 'Not enough Aether Crystals.', state: normalized, cost };
+            return { ok: false, error: 'Not enough crystals.', state: normalized, cost };
         }
 
         normalized.totalAetherCrystals -= cost;
@@ -985,6 +1046,13 @@
         MINING_COMMUNITY_STORAGE_KEY,
         OVERLOAD_DURATION_MS,
         OVERLOAD_CHARGE_PER_WORD,
+        OVERLOAD_PASSIVE_MULTIPLIER,
+        LAYER_HP_GROWTH,
+        CRYSTALS_PER_HP,
+        COMBO_CAP,
+        DRONE_TYPE_UNLOCK_LEVEL,
+        getLayerCrystalReward,
+        getComboMultiplier,
         STORY_LIBRARY,
         MINING_UPGRADES,
         DRONE_SPECIALIZATIONS,
@@ -1018,4 +1086,5 @@
         getBufferedCommunityContribution,
         flushMiningCommunityBuffer,
     };
-})(window);
+    if (typeof module !== 'undefined' && module.exports) module.exports = global.TypeMineMining;
+})(typeof window !== 'undefined' ? window : globalThis);

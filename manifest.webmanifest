@@ -1,30 +1,73 @@
 {
   "name": "TypeMine Galactic",
   "short_name": "TypeMine",
-  "description": "Fast-paced typing tests, challenges, leaderboards, and rewards.",
+  "description": "A typing game: quick tests, daily goals, a story mode and leaderboards.",
   "id": "/",
   "start_url": "/",
   "scope": "/",
+  "lang": "en",
+  "dir": "ltr",
   "display": "standalone",
-  "orientation": "portrait-primary",
+  "orientation": "any",
   "background_color": "#0f0f1a",
   "theme_color": "#7c6ff7",
+  "categories": ["games", "education", "productivity"],
   "icons": [
     {
       "src": "/icons/icon-192.png",
       "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "/icons/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "purpose": "any"
     },
     {
       "src": "/icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-192-maskable.png",
+      "sizes": "192x192",
+      "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Quick test",
+      "short_name": "Quick test",
+      "description": "Start a random words typing test",
+      "url": "/?mode=words",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "Story mode",
+      "short_name": "Story",
+      "description": "Open the story map",
+      "url": "/?open=story",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshots/main-wide.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Typing test on a desktop screen"
+    },
+    {
+      "src": "/screenshots/main-narrow.png",
+      "sizes": "375x812",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Typing test on a phone"
     }
   ]
 }

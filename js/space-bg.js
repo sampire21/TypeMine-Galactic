@@ -13,6 +13,7 @@
         canvas.width = W * dpr; canvas.height = H * dpr;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         buildNebula();
+        if (!running && typeof drawFrame === 'function') drawFrame(); // keep a static frame while paused
     }
 
     /* ── Galaxy static textures (halo + core only) ── */
@@ -218,12 +219,29 @@
         ctx.closePath(); ctx.fill();
     }
 
-    /* ── Animation loop ── */
+    /* ── Animation loop ──
+       Capped at 30 frames per second. Paused when the tab is hidden, when a modal
+       with a solid backdrop (or the splash) covers the page, and under
+       prefers-reduced-motion (one static frame is drawn instead). */
     let time = 0;
-    function frame() {
-        requestAnimationFrame(frame);
-        time += 1 / 60;
+    let running = false;
+    let rafId = null;
+    let lastDraw = 0;
+    const FRAME_MS = 1000 / 30;
+    const reduceMotion = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
 
+    function frame(now) {
+        rafId = null;
+        if (!running) return;
+        rafId = requestAnimationFrame(frame);
+        if (now - lastDraw < FRAME_MS) return;
+        const dt = lastDraw ? Math.min(0.1, (now - lastDraw) / 1000) : 1 / 30;
+        lastDraw = now;
+        time += dt;
+        drawFrame();
+    }
+
+    function drawFrame() {
         ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = 'source-over';
 
@@ -345,7 +363,42 @@
         nextShoot = time + 4 + Math.random() * 10;
     }
 
+    function backdropCoversPage() {
+        if (document.body && document.body.classList.contains('splash-active')) return true;
+        return !!document.querySelector('.leaderboard-modal.show, .profile-modal.show, .result-overlay.show');
+    }
+
+    function start() {
+        if (running) return;
+        running = true;
+        lastDraw = 0;
+        if (rafId === null) rafId = requestAnimationFrame(frame);
+    }
+
+    function stop() {
+        running = false;
+        if (rafId !== null) { cancelAnimationFrame(rafId); rafId = null; }
+    }
+
+    let hasStaticFrame = false;
+    function updateRunning() {
+        const shouldRun = !document.hidden && !reduceMotion.matches && !backdropCoversPage();
+        if (shouldRun) { start(); return; }
+        stop();
+        if (!hasStaticFrame || reduceMotion.matches) { drawFrame(); hasStaticFrame = true; }
+    }
+
     resize();
     addEventListener('resize', resize);
-    frame();
+    document.addEventListener('visibilitychange', updateRunning);
+    if (reduceMotion.addEventListener) reduceMotion.addEventListener('change', updateRunning);
+    // Watch the modal containers and body class for open/close changes.
+    const watched = document.querySelectorAll('.leaderboard-modal, .profile-modal, .result-overlay');
+    const observer = new MutationObserver(updateRunning);
+    watched.forEach((el) => observer.observe(el, { attributes: true, attributeFilter: ['class'] }));
+    if (document.body) observer.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    drawFrame();
+    hasStaticFrame = true;
+    updateRunning();
+    window.__spaceBg = { isRunning: () => running, refresh: updateRunning };
 })();

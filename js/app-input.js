@@ -1,33 +1,18 @@
+// ── Input handling: keyboard, hidden input (soft keyboards / IME), pointer ──
+
 function handleTypingBackspace(wordMode, e) {
     if (activeChallengeId === 'nobackspace') return;
+    if (isComplete) return;
+    const changed = engineBackspace(!!wordMode);
+    if (!changed) return;
     playKeypressSound('Backspace', e);
-    if (currentIndex > 0) {
-        if (wordMode) {
-            // Delete entire previous word: skip back through spaces, then through non-spaces
-            let target = currentIndex - 1;
-            while (target > 0 && currentQuote[target] === ' ') target--;
-            while (target > 0 && currentQuote[target - 1] !== ' ') target--;
-            const count = currentIndex - target;
-            for (let i = 0; i < count; i++) { typedChars.pop(); }
-            backspaces += count;
-            currentIndex = target;
-            renderQuote();
-        } else {
-            const prevIdx = currentIndex;
-            backspaces++;
-            currentIndex--;
-            typedChars.pop();
-            if (charSpans.length === currentQuote.length) {
-                updateCharSpan(prevIdx);      // old cursor -> untyped
-                updateCharSpan(currentIndex);  // new cursor position
-            } else {
-                renderQuote();
-            }
-        }
-        recordAttemptTimelinePoint();
-        syncTypingViewportScroll();
-        updateStats();
-    }
+    recordAttemptTimelinePoint();
+    engineFrame.caret = true;
+    engineFrame.scroll = true;
+    engineFrame.stats = true;
+    engineFrame.aura = true;
+    pulseCaretTyping();
+    scheduleEngineFrame();
 }
 
 // Shared per-character logic for keydown and the hidden input path
@@ -38,70 +23,101 @@ function updateGhostDelta(elapsedMs) {
     if (!window.RunAnalysis || !ghostCursorEnabled || !ghostTimeline.length || !startTime) return;
     RunAnalysis.ghostDelta.update({
         currentIndex,
-        elapsedMs: elapsedMs != null ? elapsedMs : Date.now() - startTime,
+        elapsedMs: elapsedMs != null ? elapsedMs : getElapsed() * 1000,
         ghostTimeline,
     });
 }
 
 function processTypedChar(rawCh, e) {
     if (isComplete) return;
+    if (isBlockingModalOpen()) return;
     const ch = normalizeTypedChar(rawCh);
-    if (ch === ' ' && !startTime) return; // idle: let document handler call newTest()
+    if (!startTime) {
+        // A fresh test: Space does nothing (it used to reroll the text).
+        if (ch === ' ') return;
+    }
     const expected = currentQuote[currentIndex];
-    const matches = typedCharMatches(ch, expected);
-    // Store the target char when equivalent so every downstream comparison stays strict
-    const stored = matches ? expected : ch;
+    const willStart = !startTime;
 
     // Perfectionist: any wrong key = instant fail
-    if (activeChallengeId === 'perfectionist' && !matches) {
+    if (activeChallengeId === 'perfectionist' && !typedCharMatches(ch, expected == null ? '' : expected)) {
+        stopTimer();
         showChallengeFail();
         return;
     }
 
-    playKeypressSound(ch, e);
+    const result = engineTypeChar(ch);
+    if (result.kind === 'ignored') return;
 
-    if (!startTime) startTimer();
+    playKeypressSound(ch, e);
+    if (willStart) {
+        if (!result.accepted) return; // a blocked first key does not start the clock
+        startTimer();
+    }
 
     if (isTimedMode()) extendWordBuffer();
 
     const apNow = performance.now();
-    if (window.AdaptivePractice && /[a-z]/i.test(expected || '')) {
+    if (window.AdaptivePractice && result.kind === 'char' && /[a-z]/i.test(expected || '')) {
         AdaptivePractice.recordKeystroke({
             expected,
             typed: ch,
-            prevChar: currentQuote[currentIndex - 1] || '',
+            prevChar: currentQuote[currentIndex - 2] || '',
             msSincePrev: adaptiveLastKeyAt ? apNow - adaptiveLastKeyAt : null,
         });
     }
     adaptiveLastKeyAt = apNow;
 
-    keyStrokes++;
-    if (!matches) mistakeCount++;
-    const prevIdx = currentIndex;
-    typedChars[currentIndex] = stored;
-    currentIndex++;
+    if (!result.accepted) {
+        // Stop-on-error rejected the key: counts against accuracy, cursor stays put.
+        engineFrame.stats = true;
+        pulseCaretTyping();
+        scheduleEngineFrame();
+        return;
+    }
+
     recordAttemptTimelinePoint();
     updateGhostDelta();
 
-    if (charSpans.length === currentQuote.length) {
-        updateCharSpan(prevIdx);    // just typed → correct/incorrect
-        updateCharSpan(currentIndex); // new cursor position
-    } else {
-        renderQuote(); // fallback for post-extension rebuilds
+    const prevIdx = result.index != null ? result.index : -1;
+    if (result.kind === 'char' && result.matches) {
+        maybeTriggerMiningShatter(prevIdx);
+        emitMiningLaserShotAtWord(prevIdx);
     }
-    maybeTriggerMiningShatter(prevIdx);
-    if (ch !== ' ' && typedChars[prevIdx] === currentQuote[prevIdx]) emitMiningLaserShotAtWord(prevIdx);
-    syncTypingViewportScroll();
     emitNebulaTrailAtCursor();
     emitXzLaserAtCursor(ch);
-    updateStats();
+    engineFrame.caret = true;
+    engineFrame.scroll = true;
+    engineFrame.stats = true;
+    engineFrame.aura = true;
+    pulseCaretTyping();
+    scheduleEngineFrame();
 
-    if (!isTimedMode() && currentIndex === currentQuote.length) {
-        isComplete = true;
-        resultsPendingOpen = true;
-        const _capturedElapsed = getElapsed();
-        setTimeout(() => { if (resultsPendingOpen) showResults(_capturedElapsed); }, 400);
+    if (!isTimedMode() && currentIndex >= currentQuote.length) {
+        completeRun(400);
     }
+}
+
+// Tab restarts a run that has started (or finished); on a fresh test it moves focus as usual.
+function handleTabKey(e) {
+    if (e.key !== 'Tab' || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return false;
+    if (isBlockingModalOpen()) return false;
+    const resultsOpen = resultOverlay.classList.contains('show');
+    if (resultsOpen) {
+        playKeypressSound('Tab', e);
+        e.preventDefault();
+        e.stopPropagation();
+        tryAgain();
+        return true;
+    }
+    if (startTime || isComplete || resultsPendingOpen) {
+        playKeypressSound('Tab', e);
+        e.preventDefault();
+        e.stopPropagation();
+        restart();
+        return true;
+    }
+    return false;
 }
 
 function handleTypingKeydown(e) {
@@ -119,18 +135,17 @@ function handleTypingKeydown(e) {
     if (isLyraGateOpen()) {
         if (handleLyraGateKeydown(e)) return;
     }
+    if (isBlockingModalOpen()) return; // a dialog owns the keyboard
+    updateCapsLockBadge(e);
+
+    if (e.key === 'Tab') {
+        handleTabKey(e);
+        return;
+    }
     if (isComplete) return;
 
     if (finishTimedOverrun()) {
         e.preventDefault();
-        return;
-    }
-
-    if (e.key === 'Tab') {
-        playKeypressSound('Tab', e);
-        e.preventDefault();
-        e.stopPropagation();
-        restart();
         return;
     }
 
@@ -142,7 +157,7 @@ function handleTypingKeydown(e) {
 
     if (!isPrintableKeyEvent(e)) return;
     if (e.repeat) return; // ignore key-held repeats — each character must be a deliberate press
-    if (e.key === ' ' && !startTime) { e.preventDefault(); return; } // idle: let document handler call newTest()
+    if (e.key === ' ' && !startTime) { e.preventDefault(); return; } // a fresh test: Space does nothing
 
     e.preventDefault();
     processTypedChar(e.key, e);
@@ -166,6 +181,7 @@ function isUserTextEntryTarget(target) {
 }
 
 hiddenInput.addEventListener('keydown', handleTypingKeydown);
+hiddenInput.addEventListener('keyup', updateCapsLockBadge);
 hiddenInput.addEventListener('paste', (e) => e.preventDefault());
 hiddenInput.addEventListener('drop', (e) => e.preventDefault());
 hiddenInput.addEventListener('beforeinput', (e) => {
@@ -175,9 +191,12 @@ hiddenInput.addEventListener('beforeinput', (e) => {
 hiddenInput.addEventListener('blur',  () => {
     quoteDisplay.classList.remove('focused');
     if (lyraQuoteDisplay) lyraQuoteDisplay.classList.remove('focused');
+    // Mid-run: dim the text and say how to continue. The clock keeps running.
+    if (startTime && !isComplete && !isLyraGateOpen()) scheduleFocusLostOverlay();
 });
 hiddenInput.addEventListener('focus', () => {
     if (!hiddenInput.value) resetHiddenInput();
+    hideFocusLostOverlay();
     if (isLyraGateOpen()) {
         quoteDisplay.classList.remove('focused');
         if (lyraQuoteDisplay) lyraQuoteDisplay.classList.add('focused');
@@ -186,18 +205,16 @@ hiddenInput.addEventListener('focus', () => {
         quoteDisplay.classList.add('focused');
     }
 });
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden && startTime && !isComplete) showFocusLostOverlay();
+});
 document.getElementById('lyra-gate-modal')?.addEventListener('pointerdown', () => {
     if (isLyraGateOpen()) setTimeout(() => focusLyraInput(), 0);
 });
 
 // ── Mobile virtual keyboard detection ──────────────────────────────────────
 (function initMobileSupport() {
-    const isTouchDevice = matchMedia('(pointer: coarse)').matches;
-    if (!isTouchDevice) return;
-
-    // Update hint text for mobile users
-    const hintEl = document.getElementById('hint');
-    if (hintEl) hintEl.textContent = 'Tap the text above to begin · Buttons below to restart';
+    if (!isTouchDevice()) return;
 
     // Virtual keyboard detection via visualViewport API
     if (window.visualViewport) {
@@ -241,6 +258,7 @@ function processInputText(text) {
     if (isSplashScreenOpen()) return;
     const lyraOpen = isLyraGateOpen();
     if (!lyraOpen && isComplete) return;
+    if (!lyraOpen && isBlockingModalOpen()) return;
     // Limit a single event (swipe, autocorrect) to the rest of the current word plus 1
     let remaining;
     if (lyraOpen) {
@@ -289,7 +307,11 @@ hiddenInput.addEventListener('compositionend', (e) => {
     resetHiddenInput();
 });
 
-document.addEventListener('keydown', handleModalFocusTrap);
+// Focus trap first; while a dialog is open, Tab never reaches the typing handlers below.
+document.addEventListener('keydown', (e) => {
+    handleModalFocusTrap(e);
+    if (e.key === 'Tab' && isBlockingModalOpen()) e.stopImmediatePropagation();
+});
 document.addEventListener('keydown', (e) => {
     if (window.OrionMode && OrionMode.isOpen()) return; // Orion Bulwark owns the keyboard
     const resultsOpen = resultOverlay.classList.contains('show');
@@ -349,43 +371,9 @@ document.addEventListener('keydown', (e) => {
         }
     }
 
-    // Do not hijack keyboard input while user is typing in UI form fields.
-    if (isUserTextEntryTarget(activeEl)) return;
-
-    if (resultsPendingOpen && e.key === ' ') {
-        e.preventDefault();
-        return;
-    }
-
-    // Spacebar = new test when idle, complete, or results showing
-    if (e.key === ' ' && (isComplete || resultsOpen || !startTime)) {
-        e.preventDefault();
-        newTest();
-        return;
-    }
-
-    if (isComplete || resultsOpen) {
-        if (e.key === 'Tab') {
-            playKeypressSound('Tab', e);
-            e.preventDefault();
-            tryAgain();
-            return;
-        }
-    }
-
-    if (e.key === 'Tab') { e.preventDefault(); restart(); return; }
-
-    // If focus was lost (e.g., after clicking UI controls), first typing key should
-    // immediately re-focus the hidden input and continue the test.
-    if (!resultsOpen && activeEl !== hiddenInput && isTypingIntentKey(e)) {
-        e.preventDefault();
-        focusInput();
-        handleTypingKeydown(e);
-        return;
-    }
-
     if (e.key === 'Escape') {
-        if (resultOverlay.classList.contains('show')) closeResults();
+        const hadDialog = isBlockingModalOpen() || resultsOpen || !!document.querySelector('#keysound-menu.show, #music-menu.show');
+        if (resultsOpen) closeResults();
         closeLeaderboard();
         closeSkills();
         closeInventory();
@@ -401,7 +389,56 @@ document.addEventListener('keydown', (e) => {
         closeMissionBriefing();
         closeKeySoundMenu();
         closeMusicMenu();
+        if (hadDialog || isUserTextEntryTarget(activeEl)) return;
+        // Esc on an idle or finished test: new text
+        if ((!startTime || isComplete) && currentMode !== 'daily') {
+            e.preventDefault();
+            newTest();
+        }
+        return;
     }
+
+    // A dialog (login, leaderboard, shop...) owns every other key while it is open.
+    if (isBlockingModalOpen()) return;
+
+    // Do not hijack keyboard input while user is typing in UI form fields.
+    if (isUserTextEntryTarget(activeEl)) return;
+
+    updateCapsLockBadge(e);
+
+    if (resultsPendingOpen && e.key === ' ') {
+        // Finished a moment ago: record the run now rather than losing it.
+        e.preventDefault();
+        finalizePendingResult();
+        return;
+    }
+
+    // Spacebar = new test once a run is complete or results are showing
+    if (e.key === ' ' && (isComplete || resultsOpen)) {
+        e.preventDefault();
+        newTest();
+        return;
+    }
+
+    if (e.key === 'Tab') {
+        if (activeEl === hiddenInput) return; // already handled by the hidden input
+        handleTabKey(e);
+        return;
+    }
+
+    // If focus was lost (e.g., after clicking UI controls), first typing key should
+    // immediately re-focus the hidden input and continue the test.
+    if (!resultsOpen && activeEl !== hiddenInput && isTypingIntentKey(e)) {
+        if (currentMode === 'daily') return;
+        e.preventDefault();
+        focusInput();
+        handleTypingKeydown(e);
+        return;
+    }
+});
+document.addEventListener('keyup', (e) => {
+    if (isUserTextEntryTarget(document.activeElement)) return;
+    updateCapsLockBadge(e);
 });
 
 document.addEventListener('pointerdown', (e) => {

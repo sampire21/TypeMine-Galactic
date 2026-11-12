@@ -1,16 +1,26 @@
+// ── Entry splash ─────────────────────────────────────────────────────────────
+// One screen: logo, a big "Start typing" button, and "Log in" / "Create account"
+// links. Any key also starts. The old guide panel and "briefing" step are gone;
+// the lore now lives in the Help modal (opened from the settings panel).
+
+let splashHideTimer = null;
+let pendingOpenAfterSplash = null; // set from app-boot.js for "?open=story" shortcuts
+
 function isSplashScreenOpen() {
     const splash = document.getElementById('entry-splash');
     return !!(splash && !splash.classList.contains('hidden'));
 }
 
+// A modal (log in / create account) sitting on top of the splash counts as
+// "options visible": the global key handler then leaves keystrokes alone so
+// people can type into the form.
 function isSplashOptionsVisible() {
-    const splash = document.getElementById('entry-splash');
-    return !!(splash && splash.classList.contains('phase-options'));
+    if (!isSplashScreenOpen()) return false;
+    return !!(typeof activeModalEl !== 'undefined' && activeModalEl);
 }
 
 function isSplashGuideVisible() {
-    const splash = document.getElementById('entry-splash');
-    return !!(splash && splash.classList.contains('phase-guide'));
+    return false;
 }
 
 function playUiCue(audio) {
@@ -31,110 +41,75 @@ function playUiCue(audio) {
     }
 }
 
-function updateSplashGuideRoute(action) {
-    const note = document.getElementById('entry-guide-route-note');
-    if (!note) return;
-    if (action === 'login') {
-        note.textContent = 'Authentication console selected. Review the systems brief, then continue to login.';
-        return;
-    }
-    if (action === 'signup') {
-        note.textContent = 'New pilot registration selected. Review the systems brief, then continue to account creation.';
-        return;
-    }
-    if (action === 'continue-user' && currentUser && currentUser.username) {
-        note.textContent = `Identity lock confirmed for ${currentUser.username}. Review the systems brief, then continue to the command deck.`;
-        return;
-    }
-    note.textContent = 'Guest access selected. Review the systems brief, then continue to the command deck.';
+function updateSplashGuideRoute() {}
+
+function splashHasSavedUser() {
+    return !!(typeof currentUser !== 'undefined' && currentUser && currentUser.username);
 }
 
-function revealSplashOptions() {
-    const splash = document.getElementById('entry-splash');
+// Called after boot and again once restoreSession() resolves.
+function updateSplashForUser() {
+    const startBtn = document.getElementById('entry-guest-btn');
     const loginBtn = document.getElementById('entry-login-btn');
-    if (!splash) return;
-    splashPendingAction = null;
-    splash.classList.remove('phase-intro');
-    splash.classList.remove('phase-guide');
-    splash.classList.add('phase-options');
-    document.getElementById('entry-guide-panel')?.setAttribute('aria-hidden', 'true');
-    if (loginBtn) setTimeout(() => loginBtn.focus(), 120);
+    const signupBtn = document.getElementById('entry-signup-btn');
+    const note = document.getElementById('entry-splash-note');
+    const title = document.getElementById('entry-splash-title');
+    const saved = splashHasSavedUser();
+    if (startBtn) startBtn.textContent = saved ? `Continue as ${currentUser.username}` : 'Start typing';
+    if (loginBtn) loginBtn.hidden = saved;
+    if (signupBtn) signupBtn.hidden = saved;
+    if (note) note.textContent = saved ? 'Not you? Log out from your profile after you start.' : 'No account needed. Your progress is saved in this browser.';
+    if (title) title.textContent = saved ? 'Press any key or tap Continue to begin' : 'Press any key or tap Start to begin';
 }
 
-function showSplashGuide(action) {
-    const splash = document.getElementById('entry-splash');
-    const guidePanel = document.getElementById('entry-guide-panel');
-    const cta = document.getElementById('entry-guide-cta');
-    if (!splash) return;
-    splashPendingAction = action;
-    updateSplashGuideRoute(action);
-    splash.classList.remove('phase-intro', 'phase-options');
-    splash.classList.add('phase-guide');
-    if (guidePanel) guidePanel.setAttribute('aria-hidden', 'false');
-    if (cta) setTimeout(() => cta.focus(), 120);
+function startFromSplash() {
+    if (!isSplashScreenOpen()) return;
+    if (typeof activeModalEl !== 'undefined' && activeModalEl) return;
+    const saved = splashHasSavedUser();
+    hideSplashScreen();
+    playUiCue(SFX.logon);
+    if (typeof setAuthNote === 'function') setAuthNote(saved ? `Continuing as ${currentUser.username}.` : 'Continuing as guest.');
+    if (typeof hiddenInput !== 'undefined' && hiddenInput) hiddenInput.blur();
+}
+
+// Kept for the global key handler in js/app-input.js: "any key" now starts.
+function revealSplashOptions() {
+    startFromSplash();
+}
+
+function showSplashGuide() {
+    startFromSplash();
 }
 
 function runSplashPendingAction() {
-    const action = splashPendingAction;
-    splashPendingAction = null;
-    if (action === 'login') {
-        playUiCue(SFX.ding);
-        showSplashPrompt();
-        openLoginModal();
-        return;
-    }
-    if (action === 'signup') {
-        playUiCue(SFX.ding);
-        showSplashPrompt();
-        openSignupModal();
-        return;
-    }
-    if (action === 'continue-user') {
-        hideSplashScreen();
-        playUiCue(SFX.logon);
-        setAuthNote(`Continuing as ${currentUser && currentUser.username ? currentUser.username : 'pilot'}.`);
-        hiddenInput.blur();
-        return;
-    }
-    if (action === 'guest') {
-        hideSplashScreen();
-        playUiCue(SFX.logon);
-        setAuthNote('Continuing as guest.');
-        hiddenInput.blur();
-    }
+    startFromSplash();
 }
 
 function continueFromSplashGuide() {
-    if (!isSplashScreenOpen() || !isSplashGuideVisible() || !splashPendingAction) return;
-    runSplashPendingAction();
+    startFromSplash();
 }
 
+// Clicking the splash background does nothing; the Start button or a key starts.
 function handleSplashScreenClick(event) {
-    if (!isSplashScreenOpen() || isSplashOptionsVisible() || isSplashGuideVisible()) return;
-    if (event) {
-        event.preventDefault();
-        event.stopPropagation();
-    }
-    playUiCue(SFX.ding);
-    revealSplashOptions();
+    if (!isSplashScreenOpen()) return;
+    if (event && event.target && event.target.closest('button, a, input')) return;
+    if (event) event.stopPropagation();
 }
 
 function showSplashPrompt() {
     const splash = document.getElementById('entry-splash');
-    const guidePanel = document.getElementById('entry-guide-panel');
     if (!splash) return;
-    splashPendingAction = null;
-    splash.classList.remove('phase-guide');
-    splash.classList.remove('phase-options');
+    splash.classList.remove('phase-guide', 'phase-options');
     splash.classList.add('phase-intro');
-    if (guidePanel) guidePanel.setAttribute('aria-hidden', 'true');
 }
 
 function initEntrySplashStars() {
     const starsLayer = document.getElementById('entry-splash-stars');
     if (!starsLayer || starsLayer.dataset.ready === '1') return;
     starsLayer.innerHTML = '';
-    const starCount = 100 + Math.floor(Math.random() * 51);
+    const narrow = window.innerWidth < 700;
+    const base = narrow ? 50 : 100;
+    const starCount = base + Math.floor(Math.random() * (narrow ? 26 : 51));
     const regularStarPalette = ['#eff6ff', '#e2e8f0', '#dbeafe', '#bfdbfe'];
     const aetherStarPalette = ['#ddd6fe', '#c4b5fd', '#fde68a', '#facc15'];
     for (let i = 0; i < starCount; i++) {
@@ -170,32 +145,52 @@ function hideSplashScreen() {
     splash.classList.add('hidden');
     splash.setAttribute('aria-hidden', 'true');
     document.body.classList.remove('splash-active');
+    // After the fade, take the splash out of the layout entirely so its star
+    // animations stop costing CPU (display: none via the "gone" class).
+    if (splashHideTimer) clearTimeout(splashHideTimer);
+    splashHideTimer = setTimeout(() => {
+        splashHideTimer = null;
+        if (splash.classList.contains('hidden')) splash.classList.add('gone');
+    }, 320);
+    if (pendingOpenAfterSplash === 'story') {
+        pendingOpenAfterSplash = null;
+        if (typeof openSectorMap === 'function') setTimeout(() => openSectorMap(), 350);
+    }
 }
 
 function openLoginFromSplash() {
     playUiCue(SFX.ding);
-    showSplashGuide(currentUser && currentUser.username ? 'continue-user' : 'login');
+    if (splashHasSavedUser()) {
+        startFromSplash();
+        return;
+    }
+    openLoginModal();
 }
 
 function openSignupFromSplash() {
     playUiCue(SFX.ding);
-    showSplashGuide('signup');
+    openSignupModal();
 }
 
 function continueAsGuestFromSplash() {
     playUiCue(SFX.ding);
-    showSplashGuide('guest');
+    startFromSplash();
 }
 
 function initializeEntrySplash() {
     const splash = document.getElementById('entry-splash');
     if (!splash) return;
+    if (splashHideTimer) {
+        clearTimeout(splashHideTimer);
+        splashHideTimer = null;
+    }
     initEntrySplashStars();
     document.body.classList.add('splash-active');
     showSplashPrompt();
-    splash.classList.remove('hidden');
+    updateSplashForUser();
+    splash.classList.remove('hidden', 'gone');
     splash.setAttribute('aria-hidden', 'false');
-    hiddenInput.blur();
+    if (typeof hiddenInput !== 'undefined' && hiddenInput) hiddenInput.blur();
 }
 
 function openLoginModal() {
@@ -223,4 +218,22 @@ function handleLoginModalBackdrop(event) {
 function openProfileOrLogin() {
     if (currentUser) openProfile();
     else openLoginModal();
+}
+
+// ── Help modal (how the game works, plus the story lore) ────────────────────
+function openHelpModal() {
+    const modal = document.getElementById('help-modal');
+    if (!modal) return;
+    if (typeof closeSettingsPanel === 'function') closeSettingsPanel();
+    openModal(modal);
+}
+
+function closeHelpModal() {
+    const modal = document.getElementById('help-modal');
+    if (!modal) return;
+    closeModal(modal);
+}
+
+function handleHelpModalBackdrop(event) {
+    if (event && event.target === document.getElementById('help-modal')) closeHelpModal();
 }

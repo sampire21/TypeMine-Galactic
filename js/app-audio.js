@@ -1,5 +1,91 @@
+// ── Audio boot guards ────────────────────────────────────────────────────────
+// The audio globals normally come from js/app-input.js. If that file ever drops
+// them, define fallbacks so the sound code keeps working.
+(function ensureAudioGlobals() {
+    const fallbacks = {
+        themeMusic: () => ({ dark: new Audio(), universe: new Audio() }),
+        soundscapePreviewAudio: () => new Audio(),
+        MUSIC_VOLUME_KEY: () => 'sampire-music-volume',
+        KEY_SOUND_VOLUME_KEY: () => 'sampire-key-sound-volume',
+        DEFAULT_MUSIC_VOLUME: () => 0.25,
+        DEFAULT_KEY_SOUND_VOLUME: () => 1,
+        musicMuted: () => false,
+        musicNeedsUserGesture: () => false,
+        keySoundsEnabled: () => false,
+        musicVolume: () => 0.25,
+        keySoundVolume: () => 1,
+        activeMusicTheme: () => 'dark',
+        unlockShopHintEl: () => null,
+        unlockShopHintTimer: () => null,
+        lastPointerX: () => window.innerWidth * 0.5,
+        lastPointerY: () => window.innerHeight * 0.5,
+        KEY_SOUND_BASE_ROOT: () => 'Sound Effects',
+        KEY_SOUND_DEFAULT_PACK: () => 'nk-cream',
+        KEY_SOUND_PACK_KEY: () => 'sampire-key-sound-pack',
+        keySoundPools: () => new Map(),
+        KEY_SOUND_POOL_SIZE: () => 4,
+        keySoundPackName: () => 'nk-cream',
+        keySoundPackConfig: () => null,
+        keySoundPackLoadPromise: () => null,
+        keySoundPackLoadAttempted: () => false,
+        keySoundPackConfigCache: () => new Map(),
+        pbFxTimeout: () => null,
+    };
+    Object.keys(fallbacks).forEach((name) => {
+        let defined = true;
+        try { defined = (new Function(`return typeof ${name} !== 'undefined'`))(); } catch (e) { defined = true; }
+        if (!defined) window[name] = fallbacks[name]();
+    });
+})();
+
+// Nothing audio-related is fetched until the player has clicked, tapped or pressed a key.
+let audioGestureSeen = false;
+const THEME_MUSIC_SOURCES = {
+    dark: 'Sound Effects/Dark Main Theme.mp3',
+    universe: 'Sound Effects/Your Own Personal Universe.mp3',
+};
+
+// The theme tracks are large (10 to 22 MB). Strip their source until play() is
+// actually called, so nothing downloads unless music is on and the player has interacted.
+function deferMediaUntilPlay(track, src) {
+    if (!track || typeof track.play !== 'function') return;
+    track.__lazySrc = src;
+    try {
+        track.preload = 'none';
+        if (track.getAttribute('src')) {
+            track.removeAttribute('src');
+            track.load(); // cancels any fetch queued when the element was created
+        }
+    } catch (e) {}
+    const nativePlay = HTMLMediaElement.prototype.play;
+    track.play = function lazyPlay() {
+        if (this.__lazySrc && !this.getAttribute('src')) {
+            this.preload = 'auto';
+            this.src = this.__lazySrc;
+        }
+        return nativePlay.apply(this, arguments);
+    };
+}
+deferMediaUntilPlay(themeMusic.dark, THEME_MUSIC_SOURCES.dark);
+deferMediaUntilPlay(themeMusic.universe, THEME_MUSIC_SOURCES.universe);
+deferMediaUntilPlay(soundscapePreviewAudio, THEME_MUSIC_SOURCES.universe);
+
+function markAudioGesture() {
+    if (audioGestureSeen) return;
+    audioGestureSeen = true;
+    warmSoundEffects();
+    if (typeof loadKeySoundPackConfig === 'function' && !keySoundPackLoadAttempted) loadKeySoundPackConfig();
+}
+document.addEventListener('pointerdown', markAudioGesture, { capture: true, passive: true });
+document.addEventListener('keydown', markAudioGesture, { capture: true });
+
 function playThemeSoundtrack() {
     if (musicMuted) return;
+    if (!audioGestureSeen) {
+        // Browsers block autoplay anyway; do not even start the download yet.
+        musicNeedsUserGesture = true;
+        return;
+    }
     const track = themeMusic[activeMusicTheme] || themeMusic.dark;
     if (!track.paused && !track.ended) {
         musicNeedsUserGesture = false;
@@ -17,6 +103,11 @@ function stopThemeSoundtracks() {
 }
 
 function clampAudioVolume(value, fallback = 1) {
+    // No stored value (null, undefined, empty string) means "use the default".
+    // Number(null) is 0, which used to silence every new player.
+    if (value === null || value === undefined || value === '') {
+        return Math.max(0, Math.min(1, Number(fallback) || 0));
+    }
     const n = Number(value);
     if (!Number.isFinite(n)) return Math.max(0, Math.min(1, Number(fallback) || 0));
     return Math.max(0, Math.min(1, n));
@@ -65,13 +156,18 @@ function updateMusicToggleUi() {
         btn.classList.toggle('active', !musicMuted);
         btn.classList.toggle('inactive', musicMuted);
     }
+    const sw = document.getElementById('music-switch');
+    if (sw) sw.setAttribute('aria-checked', musicMuted ? 'false' : 'true');
 }
 
 function updateMusicMenuUI() {
+    const current = document.getElementById('music-theme-current');
     document.querySelectorAll('#music-menu .music-option[data-theme]').forEach((btn) => {
         const theme = String(btn.dataset.theme || '');
         const isActive = theme === activeMusicTheme;
         btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        if (isActive && current) current.textContent = btn.textContent.trim();
         btn.onmouseenter = null;
         btn.onmouseleave = null;
         btn.onfocus = null;
@@ -85,9 +181,9 @@ function updateMusicMenuUI() {
                     updateLastPointerPositionFromEvent(event);
                     showUnlockShopHintNearCursor('Unlock in the shop!');
                 };
-                btn.onmouseleave = hideUnlockShopHint;
+                btn.onmouseleave = scheduleHideUnlockShopHint;
                 btn.onfocus = () => showUnlockShopHintNearCursor('Unlock in the shop!');
-                btn.onblur = hideUnlockShopHint;
+                btn.onblur = scheduleHideUnlockShopHint;
             }
         } else {
             btn.classList.remove('locked');
@@ -99,8 +195,10 @@ function updateMusicMenuUI() {
 function openMusicMenu() {
     const menu = document.getElementById('music-menu');
     if (!menu) return;
+    closeKeySoundMenu();
     menu.classList.add('show');
     menu.setAttribute('aria-hidden', 'false');
+    document.getElementById('music-toggle')?.setAttribute('aria-expanded', 'true');
     updateMusicMenuUI();
     updateMusicVolumeUI();
 }
@@ -110,6 +208,7 @@ function closeMusicMenu() {
     if (!menu) return;
     menu.classList.remove('show');
     menu.setAttribute('aria-hidden', 'true');
+    document.getElementById('music-toggle')?.setAttribute('aria-expanded', 'false');
 }
 
 function toggleMusicMenu(event) {
@@ -132,12 +231,29 @@ function hideUnlockShopHint() {
     unlockShopHintEl = null;
 }
 
+// Used when the pointer leaves a locked option: give it a moment so the player can
+// move onto the "Unlock in the shop" button instead of watching it vanish.
+function scheduleHideUnlockShopHint() {
+    if (!unlockShopHintEl) return;
+    if (unlockShopHintTimer) clearTimeout(unlockShopHintTimer);
+    unlockShopHintTimer = setTimeout(() => {
+        unlockShopHintTimer = null;
+        if (unlockShopHintEl && unlockShopHintEl.matches(':hover')) return;
+        hideUnlockShopHint();
+    }, 450);
+}
+
 function showUnlockShopHintNearCursor(message = 'Unlock in the shop!', autoHideMs = 0) {
     hideUnlockShopHint();
     const hint = document.createElement('button');
     hint.type = 'button';
     hint.className = 'unlock-shop-hint';
     hint.textContent = message;
+    hint.setAttribute('aria-label', `${message} Opens the shop.`);
+    hint.addEventListener('pointerenter', () => {
+        if (unlockShopHintTimer) { clearTimeout(unlockShopHintTimer); unlockShopHintTimer = null; }
+    });
+    hint.addEventListener('pointerleave', scheduleHideUnlockShopHint);
     const x = Number.isFinite(lastPointerX) ? lastPointerX : (window.innerWidth * 0.5);
     const y = Number.isFinite(lastPointerY) ? lastPointerY : (window.innerHeight * 0.5);
     hint.style.left = `${x + 12}px`;
@@ -148,6 +264,7 @@ function showUnlockShopHintNearCursor(message = 'Unlock in the shop!', autoHideM
         hideUnlockShopHint();
         closeMusicMenu();
         closeKeySoundMenu();
+        if (typeof closeSettingsPanel === 'function') closeSettingsPanel();
         openSkills();
     });
     document.body.appendChild(hint);
@@ -238,10 +355,10 @@ async function shareSite() {
 }
 
 function setKeySoundToggleUI() {
-    const label = document.getElementById('keysound-label');
     const state = document.getElementById('keysound-state');
     const btn = document.getElementById('keysound-toggle');
-    if (label) label.textContent = 'Key Sounds';
+    const sw = document.getElementById('keysound-switch');
+    if (sw) sw.setAttribute('aria-checked', keySoundsEnabled ? 'true' : 'false');
     if (!state) return;
     state.textContent = keySoundsEnabled ? '✓' : '✗';
     state.classList.toggle('on', keySoundsEnabled);
@@ -253,11 +370,15 @@ function setKeySoundToggleUI() {
 }
 
 function updateKeySoundPackMenuUI() {
+    const current = document.getElementById('keysound-pack-current');
     document.querySelectorAll('#keysound-menu .keysound-option[data-pack]').forEach((btn) => {
         const pack = String(btn.dataset.pack || '');
         const unlocked = isKeySoundPackUnlocked(pack);
         const isDefault = pack === KEY_SOUND_DEFAULT_PACK;
-        btn.classList.toggle('active', pack === keySoundPackName);
+        const isActive = pack === keySoundPackName;
+        btn.classList.toggle('active', isActive);
+        btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+        if (isActive && current) current.textContent = btn.textContent.trim();
         btn.classList.toggle('locked', !unlocked);
         btn.title = '';
         btn.onmouseenter = null;
@@ -269,9 +390,9 @@ function updateKeySoundPackMenuUI() {
                 updateLastPointerPositionFromEvent(event);
                 showUnlockShopHintNearCursor('Unlock in the shop!');
             };
-            btn.onmouseleave = hideUnlockShopHint;
+            btn.onmouseleave = scheduleHideUnlockShopHint;
             btn.onfocus = () => showUnlockShopHintNearCursor('Unlock in the shop!');
-            btn.onblur = hideUnlockShopHint;
+            btn.onblur = scheduleHideUnlockShopHint;
         }
         if (isDefault) btn.title = 'Default pack';
     });
@@ -308,8 +429,10 @@ function handleKeySoundVolumeInput(event) {
 function openKeySoundMenu() {
     const menu = document.getElementById('keysound-menu');
     if (!menu) return;
+    closeMusicMenu();
     menu.classList.add('show');
     menu.setAttribute('aria-hidden', 'false');
+    document.getElementById('keysound-toggle')?.setAttribute('aria-expanded', 'true');
     updateKeySoundPackMenuUI();
     updateKeySoundVolumeUI();
 }
@@ -319,6 +442,7 @@ function closeKeySoundMenu() {
     if (!menu) return;
     menu.classList.remove('show');
     menu.setAttribute('aria-hidden', 'true');
+    document.getElementById('keysound-toggle')?.setAttribute('aria-expanded', 'false');
 }
 
 function toggleKeySoundMenu(event) {
@@ -623,29 +747,50 @@ function retryThemeMusicAfterGesture() {
 }
 
 // ── Sound Effects ───────────────────────────────────────────────────────────
-const SFX = {
-    newTest:      new Audio('Sound Effects/New Test.wav'),
-    restartTest:  new Audio('Sound Effects/Restart Test.wav'),
-    tryAgain:     new Audio('Sound Effects/Try Again.wav'),
-    completed:    new Audio('Sound Effects/Test Completed.wav'),
-    personalBest: new Audio('Sound Effects/New Personal Best.wav'),
-    clearHistory: new Audio('Sound Effects/Clear History.wav'),
-    changeMode:   new Audio('Sound Effects/Change Mode.wav'),
-    below50:      new Audio('Sound Effects/Below 50 WPM.wav'),
-    purchase1:    new Audio('Sound Effects/Purchase 1.mp3'),
-    laser:        new Audio('Sound Effects/laser.mp3'),
-    ding:         new Audio('Sound Effects/Ding.wav'),
-    logon:        new Audio('Sound Effects/Logon.wav'),
+// Short effects were converted from WAV (4.1 MB) to MP3 (0.3 MB). Each Audio object is
+// created the first time it is needed, and all of them are warmed up on the first gesture.
+const SFX_SOURCES = {
+    newTest:      'Sound Effects/New Test.mp3',
+    restartTest:  'Sound Effects/Restart Test.mp3',
+    tryAgain:     'Sound Effects/Try Again.mp3',
+    completed:    'Sound Effects/Test Completed.mp3',
+    personalBest: 'Sound Effects/New Personal Best.mp3',
+    clearHistory: 'Sound Effects/Clear History.mp3',
+    changeMode:   'Sound Effects/Change Mode.mp3',
+    below50:      'Sound Effects/Below 50 WPM.mp3',
+    purchase1:    'Sound Effects/Purchase 1.mp3',
+    laser:        'Sound Effects/laser.mp3',
+    ding:         'Sound Effects/Ding.mp3',
+    logon:        'Sound Effects/Logon.mp3',
+    levelUp:      'Sound Effects/New Personal Best.mp3',
 };
-
-Object.values(SFX).forEach((audio) => {
-    if (!audio) return;
-    audio.preload = 'auto';
-    try { audio.load(); } catch (e) {}
+const sfxCache = {};
+function getSoundEffect(name) {
+    if (!sfxCache[name]) {
+        const audio = new Audio();
+        audio.preload = audioGestureSeen ? 'auto' : 'none';
+        audio.src = SFX_SOURCES[name];
+        sfxCache[name] = audio;
+    }
+    return sfxCache[name];
+}
+const SFX = {};
+Object.keys(SFX_SOURCES).forEach((name) => {
+    Object.defineProperty(SFX, name, { enumerable: true, get: () => getSoundEffect(name) });
 });
+function warmSoundEffects() {
+    Object.keys(SFX_SOURCES).forEach((name) => {
+        const audio = getSoundEffect(name);
+        if (audio.preload !== 'auto') {
+            audio.preload = 'auto';
+            try { audio.load(); } catch (e) {}
+        }
+    });
+}
 
 function playSound(audio) {
-    audio.currentTime = 0;
+    if (!audio || typeof audio.play !== 'function') return;
+    try { audio.currentTime = 0; } catch (e) {}
     audio.play().catch(() => {}); // silently ignore autoplay policy blocks
 }
 
@@ -685,6 +830,107 @@ function runPersonalBestCelebration() {
     }, 2100);
 }
 
+
+
+// ── Settings panel (gear button in the top bar) ─────────────────────────────
+const LIVE_CHART_KEY = 'sampire-live-chart';
+let liveChartEnabled = true;
+
+function isSettingsPanelOpen() {
+    const panel = document.getElementById('settings-panel');
+    return !!(panel && panel.classList.contains('show'));
+}
+
+function openSettingsPanel() {
+    const panel = document.getElementById('settings-panel');
+    const toggle = document.getElementById('settings-toggle');
+    if (!panel) return;
+    panel.hidden = false;
+    panel.classList.add('show');
+    panel.setAttribute('aria-hidden', 'false');
+    if (toggle) toggle.setAttribute('aria-expanded', 'true');
+    document.body.classList.add('settings-open');
+    updateMusicMenuUI();
+    updateMusicVolumeUI();
+    updateKeySoundPackMenuUI();
+    updateKeySoundVolumeUI();
+    setKeySoundToggleUI();
+    updateMusicToggleUi();
+    updateLiveChartToggleUI();
+    const first = panel.querySelector('button, [href], input, [tabindex]:not([tabindex="-1"])');
+    if (first) setTimeout(() => first.focus(), 30);
+}
+
+function closeSettingsPanel() {
+    const panel = document.getElementById('settings-panel');
+    const toggle = document.getElementById('settings-toggle');
+    if (!panel || !panel.classList.contains('show')) return;
+    closeKeySoundMenu();
+    closeMusicMenu();
+    hideUnlockShopHint();
+    panel.classList.remove('show');
+    panel.setAttribute('aria-hidden', 'true');
+    panel.hidden = true;
+    if (toggle) {
+        toggle.setAttribute('aria-expanded', 'false');
+        if (panel.contains(document.activeElement)) toggle.focus();
+    }
+    document.body.classList.remove('settings-open');
+}
+
+function toggleSettingsPanel(event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    if (isSettingsPanelOpen()) closeSettingsPanel();
+    else openSettingsPanel();
+}
+
+document.addEventListener('pointerdown', (e) => {
+    if (!isSettingsPanelOpen()) return;
+    const panel = document.getElementById('settings-panel');
+    const toggle = document.getElementById('settings-toggle');
+    if (panel && panel.contains(e.target)) return;
+    if (toggle && toggle.contains(e.target)) return;
+    if (unlockShopHintEl && unlockShopHintEl.contains(e.target)) return;
+    closeSettingsPanel();
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (isSettingsPanelOpen()) {
+        closeSettingsPanel();
+        return;
+    }
+    const help = document.getElementById('help-modal');
+    if (help && help.classList.contains('show') && typeof closeHelpModal === 'function') closeHelpModal();
+});
+
+// Soft click on the shared .btn controls (top bar, splash, settings), using the
+// current key-sound pack. Skipped when key sounds are off.
+document.addEventListener('click', (e) => {
+    const btn = e.target && e.target.closest ? e.target.closest('.btn') : null;
+    if (!btn || !keySoundsEnabled || !audioGestureSeen) return;
+    try { playKeypressSound('Enter', null); } catch (err) {}
+}, { capture: true });
+
+function updateLiveChartToggleUI() {
+    const sw = document.getElementById('live-chart-toggle-btn');
+    if (sw) sw.setAttribute('aria-checked', liveChartEnabled ? 'true' : 'false');
+    document.body.classList.toggle('live-chart-hidden', !liveChartEnabled);
+}
+
+function loadLiveChartPreference() {
+    try { liveChartEnabled = localStorage.getItem(LIVE_CHART_KEY) !== '0'; } catch (e) { liveChartEnabled = true; }
+    updateLiveChartToggleUI();
+}
+
+function toggleLiveChart() {
+    liveChartEnabled = !liveChartEnabled;
+    try { localStorage.setItem(LIVE_CHART_KEY, liveChartEnabled ? '1' : '0'); } catch (e) {}
+    updateLiveChartToggleUI();
+}
 
 // ── Daily Challenges & XP ────────────────────────────────────────────────────
 const XP_KEY    = 'sampire-xp';
