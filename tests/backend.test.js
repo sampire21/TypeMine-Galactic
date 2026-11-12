@@ -482,6 +482,25 @@ async function main() {
         assert.ok(limited >= 1, 'expected at least one 429');
     });
 
+    await test('old single-blob leaderboard is moved to per-user best keys the first time the board is read', async () => {
+        // Simulate a deploy over a store that still has the pre-wave leaderboard:v1 blob.
+        const legacyUserId = 'legacy-user-1';
+        await app.kv.put('user:' + legacyUserId, JSON.stringify({ id: legacyUserId, username: 'oldtimer', createdAt: 1, passwordHash: 'x' }));
+        await app.kv.put('leaderboard:v1', JSON.stringify([
+            { userId: legacyUserId, username: 'oldtimer', mode: 'quotes', wpm: 123, accuracy: 97, rawWpm: 130, time: 20, date: 1700000000000 },
+            { userId: legacyUserId, username: 'oldtimer', mode: 'words30', wpm: 88, accuracy: 95, rawWpm: 92, time: 30, date: 1700000000000 },
+        ]));
+        await app.kv.delete('meta:leaderboard-v1-migrated');
+        const r = await guest.get('/api/leaderboard?tab=alltime&mode=all&limit=100&nocache=' + Date.now());
+        assert.strictEqual(r.status, 200);
+        const row = (r.data.rows || []).find((x) => x.username === 'oldtimer');
+        assert.ok(row, 'legacy row should appear on the new board');
+        assert.strictEqual(row.wpm, 123);
+        assert.ok(await app.kv.get('meta:leaderboard-v1-migrated'), 'migration marker should be set');
+        const quotes = await guest.get('/api/leaderboard?tab=alltime&mode=words30&limit=100');
+        assert.ok((quotes.data.rows || []).some((x) => x.username === 'oldtimer' && x.wpm === 88), 'per-mode legacy best should exist');
+    });
+
     await app.stop();
     console.log(`backend tests passed (${passed}) in ${((Date.now() - started) / 1000).toFixed(1)}s`);
 }

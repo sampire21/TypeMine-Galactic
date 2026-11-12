@@ -517,11 +517,40 @@ export async function listBestRows(env, prefix) {
 const BOARD_CACHE_TTL_MS = 30 * 1000;
 const boardCache = new Map();
 
+// One-time move from the old single leaderboard blob (leaderboard:v1) to the per-user best keys.
+// Runs the first time the all-time board is read after a deploy; afterwards a marker key skips it.
+const LEGACY_BOARD_KEY = 'leaderboard:v1';
+const LEGACY_BOARD_MIGRATED_KEY = 'meta:leaderboard-v1-migrated';
+export async function migrateLegacyLeaderboardOnce(env) {
+  if (!hasStorage(env)) return 0;
+  if (await env.TYPING_APP.get(LEGACY_BOARD_MIGRATED_KEY)) return 0;
+  const legacy = await getJson(env, LEGACY_BOARD_KEY, null);
+  let moved = 0;
+  if (Array.isArray(legacy)) {
+    for (const row of legacy) {
+      if (!row || !row.userId || !row.username) continue;
+      const m = normalizeMode(row.mode);
+      const key = allTimeBestKey(m, row.userId);
+      const existing = await getJson(env, key, null);
+      const candidate = { ...row, mode: m, id: row.id || `legacy-${row.userId}-${m}` };
+      if (existing && !isBetterScore(candidate, existing)) continue;
+      await putBestRow(env, key, candidate);
+      moved += 1;
+    }
+  }
+  await env.TYPING_APP.put(LEGACY_BOARD_MIGRATED_KEY, JSON.stringify({ at: Date.now(), moved }));
+  boardCache.clear();
+  return moved;
+}
+
 export async function getBoardRows(env, tab, mode, weekKey = getWeekKeyUtc()) {
   const modes = mode && mode !== 'all' ? [mode] : KNOWN_MODES;
   const cacheKey = `${tab}:${weekKey}:${modes.join(',')}`;
   const cached = boardCache.get(cacheKey);
   if (cached && Date.now() - cached.at < BOARD_CACHE_TTL_MS) return cached.rows;
+  if (tab !== 'weekly') {
+    try { await migrateLegacyLeaderboardOnce(env); } catch (e) { /* the board still renders from whatever keys exist */ }
+  }
   let rows = [];
   for (const m of modes) {
     const prefix = tab === 'weekly' ? weeklyBestPrefix(weekKey, m) : allTimeBestPrefix(m);
